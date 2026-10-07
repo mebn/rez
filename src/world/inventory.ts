@@ -31,7 +31,7 @@ export class Inventory {
   stacks(): Item[][] {
     const map = new Map<string, Item[]>();
     for (const it of this.items) {
-      const k = it.def.id;
+      const k = it.def.unique ? `${it.def.id}#${it.uid}` : it.def.id;
       const arr = map.get(k);
       if (arr) arr.push(it);
       else map.set(k, [it]);

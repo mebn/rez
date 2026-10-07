@@ -5,6 +5,7 @@ export interface InputHandlers {
   move(x: number, y: number): void;
   wheel(delta: number): void;
   key(code: string): void;
+  keyUp(code: string): void;
 }
 
 /** Canvas mouse + keyboard wiring. Coordinates are CSS px relative to the canvas. */
@@ -47,7 +48,9 @@ export function bindInput(canvas: HTMLCanvasElement, h: InputHandlers): void {
   );
   window.addEventListener("keydown", (e) => {
     if (e.target instanceof HTMLInputElement) return;
-    if (e.code === "Tab") e.preventDefault();
-    h.key(e.code);
+    if (e.code === "Tab" || e.code === "Space") e.preventDefault();
+    if (!e.repeat) h.key(e.code);
   });
+  window.addEventListener("keyup", (e) => h.keyUp(e.code));
+  window.addEventListener("blur", () => h.keyUp("*"));
 }

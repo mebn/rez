@@ -3,8 +3,8 @@ import type { Item } from "../items/types";
 import { Inventory } from "../world/inventory";
 import type { Tile } from "../world/pathfinding";
 import type { World } from "../world/world";
-
-const SPEED = 3.4; // tiles per second
+import { Health } from "./health";
+import type { Survivor } from "./survivor";
 
 /** Direction index (0 = +x, clockwise in 45° steps) from a movement vector. */
 function dirFromVec(dx: number, dy: number): number {
@@ -19,14 +19,24 @@ export class Player {
   private path: Tile[] = [];
   private walkTime = 0;
   private arrive: (() => void) | null = null;
-  readonly inventory = new Inventory("Inventory", 20);
+  readonly inventory: Inventory;
+  readonly health: Health;
   equipped: Item | null = null;
   /** 100 = full, 0 = starving. */
   satiety = 72;
+  dead = false;
+  /** Seconds survived and zombies killed by this survivor. */
+  alive = 0;
+  kills = 0;
 
-  constructor(spawn: Tile) {
+  constructor(
+    spawn: Tile,
+    readonly survivor: Survivor,
+  ) {
     this.x = spawn.x + 0.5;
     this.y = spawn.y + 0.5;
+    this.inventory = new Inventory("Inventory", survivor.carryCapacity);
+    this.health = new Health(survivor);
   }
 
   get tileX(): number {
@@ -64,12 +74,15 @@ export class Player {
   }
 
   update(dt: number, world: World): void {
-    this.satiety = Math.max(0, this.satiety - dt * 0.05);
+    if (this.dead) return;
+    this.alive += dt;
+    this.satiety = Math.max(0, this.satiety - dt * this.survivor.hungerRate);
+    this.health.update(dt, this.satiety);
     if (!this.path.length) {
       this.walkTime = 0;
       return;
     }
-    let budget = SPEED * dt;
+    let budget = this.survivor.speed * dt;
     while (budget > 0 && this.path.length) {
       const next = this.path[0];
       const cx = this.tileX;

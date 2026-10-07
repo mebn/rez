@@ -29,6 +29,21 @@ export interface EdgeInstance {
   side: Side;
   state: string;
   fade: number;
+  /** Doors: how much more banging they can take before giving way. */
+  hp?: number;
+  /** Doors smashed open by zombies can't be closed again. */
+  broken?: boolean;
+  /** Planks nailed across (0..4). Blocks everything until torn off. */
+  barricade?: number;
+  /** Banging left before the outermost plank gives. */
+  barricadeHp?: number;
+}
+
+/** Can a zombie get through this edge by bashing or climbing (door, window, barricade, low fence)? */
+export function zombiePassable(e: EdgeInstance): boolean {
+  if ((e.barricade ?? 0) > 0) return true;
+  if (e.comp.door || e.comp.category === "window") return true;
+  return e.comp.category === "fence" && e.comp.height < 60;
 }
 
 export interface FloorInstance {
@@ -47,6 +62,8 @@ export class World {
   readonly objects: ObjectInstance[] = [];
   readonly edges = new Map<string, EdgeInstance>();
   private solid: (ObjectInstance | null)[];
+  /** Vehicle id + 1 per tile, 0 = none. Vehicles move, so this is kept separate from `solid`. */
+  private vehicles: Int32Array;
   private uid = 1;
   readonly seed: number;
 
@@ -63,6 +80,7 @@ export class World {
       return { id, variant: hash2(x, y, data.seed) % comp.variants };
     });
     this.solid = new Array(this.width * this.height).fill(null);
+    this.vehicles = new Int32Array(this.width * this.height);
     for (const e of data.edges) this.addEdge(e.type, e.x, e.y, e.side, e.state);
     for (const o of data.objects) this.addObject(o);
   }
@@ -106,6 +124,38 @@ export class World {
     return inst;
   }
 
+  removeObject(o: ObjectInstance): void {
+    const i = this.objects.indexOf(o);
+    if (i >= 0) this.objects.splice(i, 1);
+    for (let dy = 0; dy < o.wy; dy++)
+      for (let dx = 0; dx < o.wx; dx++)
+        if (this.solidAt(o.x + dx, o.y + dy) === o) this.solid[(o.y + dy) * this.width + o.x + dx] = null;
+  }
+
+  vehicleAt(x: number, y: number): number {
+    return this.inBounds(x, y) ? this.vehicles[y * this.width + x] : 0;
+  }
+
+  /** Move a vehicle's claim from one set of tiles (keys are y*4096+x) to another. */
+  setVehicleTiles(id: number, from: number[], to: number[]): void {
+    for (const k of from) {
+      const x = k % 4096;
+      const y = Math.floor(k / 4096);
+      if (this.inBounds(x, y) && this.vehicles[y * this.width + x] === id) this.vehicles[y * this.width + x] = 0;
+    }
+    for (const k of to) {
+      const x = k % 4096;
+      const y = Math.floor(k / 4096);
+      if (this.inBounds(x, y)) this.vehicles[y * this.width + x] = id;
+    }
+  }
+
+  /** Does an edge block an orthogonal step from (x, y) by (dx, dy)? */
+  stepBlocked(x: number, y: number, dx: number, dy: number): boolean {
+    const e = this.edgeBetween(x, y, dx, dy);
+    return !!e && e.comp.blocksMovement(e.state);
+  }
+
   edge(x: number, y: number, side: Side): EdgeInstance | undefined {
     return this.edges.get(edgeId(x, y, side));
   }
@@ -115,7 +165,8 @@ export class World {
   }
 
   isWalkable(x: number, y: number): boolean {
-    return this.inBounds(x, y) && !this.solid[y * this.width + x] && this.floors[y * this.width + x] !== null;
+    const i = y * this.width + x;
+    return this.inBounds(x, y) && !this.solid[i] && !this.vehicles[i] && this.floors[i] !== null;
   }
 
   /** The edge crossed by an orthogonal step, if any. */
@@ -127,11 +178,49 @@ export class World {
     return undefined;
   }
 
-  /** Whether an edge blocks a step. Closed doors count as open when `throughDoors` is set. */
+  /**
+   * Whether an edge blocks a step. With `throughDoors` (pathing for the player through doors
+   * they'll open, or zombies who bash and climb) passable obstacles don't count.
+   */
   private edgeBlocks(e: EdgeInstance | undefined, throughDoors: boolean): boolean {
     if (!e) return false;
+    if (throughDoors && this.bashers && zombiePassable(e)) return false;
+    if ((e.barricade ?? 0) > 0) return true;
     if (throughDoors && e.comp.door) return false;
     return e.comp.blocksMovement(e.state);
+  }
+
+  /** Set while pathing for zombies: windows, barricades and low fences count as passable. */
+  bashers = false;
+
+  removeEdge(e: EdgeInstance): void {
+    this.edges.delete(edgeId(e.x, e.y, e.side));
+  }
+
+  /** Slide an object by (dx, dy) tiles if the space is free and no wall is in the way. */
+  moveObject(o: ObjectInstance, dx: number, dy: number): boolean {
+    for (let ty = 0; ty < o.wy; ty++)
+      for (let tx = 0; tx < o.wx; tx++) {
+        const nx = o.x + tx + dx;
+        const ny = o.y + ty + dy;
+        const occupant = this.solidAt(nx, ny);
+        if (!this.inBounds(nx, ny) || this.floors[ny * this.width + nx] === null || this.vehicleAt(nx, ny)) return false;
+        if (occupant && occupant !== o) return false;
+        if (this.stepBlocked(o.x + tx, o.y + ty, dx, dy) || this.edgeBarricaded(o.x + tx, o.y + ty, dx, dy)) return false;
+      }
+    const solid = o.comp.solid;
+    if (solid) this.removeObject(o);
+    o.x += dx;
+    o.y += dy;
+    if (solid) {
+      this.objects.push(o);
+      for (let ty = 0; ty < o.wy; ty++) for (let tx = 0; tx < o.wx; tx++) this.solid[(o.y + ty) * this.width + o.x + tx] = o;
+    }
+    return true;
+  }
+
+  private edgeBarricaded(x: number, y: number, dx: number, dy: number): boolean {
+    return (this.edgeBetween(x, y, dx, dy)?.barricade ?? 0) > 0;
   }
 
   /** Can you step from (x,y) by (dx,dy)? Diagonals need both orthogonal routes clear (no corner cutting). */
@@ -151,6 +240,45 @@ export class World {
     return !this.edgeBlocks(this.edgeBetween(x, y, dx, dy), throughDoors);
   }
 
+  /** Does this edge block line of sight? Solid walls and closed wooden doors do; windows, fences and glass don't. */
+  blocksSight(e: EdgeInstance | undefined): boolean {
+    if (!e) return false;
+    if ((e.barricade ?? 0) >= 2) return true;
+    if (e.comp.door) return e.state !== "open" && e.comp.id !== "door_glass";
+    return e.comp.category === "wall";
+  }
+
+  /**
+   * Line of sight between two points in tile space, walking the tile grid along the line and
+   * checking every border crossed.
+   */
+  canSee(x0: number, y0: number, x1: number, y1: number): boolean {
+    let tx = Math.floor(x0);
+    let ty = Math.floor(y0);
+    const ex = Math.floor(x1);
+    const ey = Math.floor(y1);
+    const dx = x1 - x0;
+    const dy = y1 - y0;
+    const sx = Math.sign(dx);
+    const sy = Math.sign(dy);
+    const tdx = sx ? Math.abs(1 / dx) : Infinity;
+    const tdy = sy ? Math.abs(1 / dy) : Infinity;
+    let tmx = sx > 0 ? (tx + 1 - x0) * tdx : sx < 0 ? (x0 - tx) * tdx : Infinity;
+    let tmy = sy > 0 ? (ty + 1 - y0) * tdy : sy < 0 ? (y0 - ty) * tdy : Infinity;
+    for (let guard = 0; guard < 128 && (tx !== ex || ty !== ey); guard++) {
+      if (tmx < tmy) {
+        if (this.blocksSight(this.edgeBetween(tx, ty, sx, 0))) return false;
+        tx += sx;
+        tmx += tdx;
+      } else {
+        if (this.blocksSight(this.edgeBetween(tx, ty, 0, sy))) return false;
+        ty += sy;
+        tmy += tdy;
+      }
+    }
+    return true;
+  }
+
   /** Tiles a player can stand on to use the thing. */
   interactTiles(target: Interactable): { x: number; y: number }[] {
     if (target.kind === "edge") {
@@ -161,6 +289,10 @@ export class World {
     const o = target.obj;
     const out: { x: number; y: number }[] = [];
     const seen = new Set<string>();
+    if (!o.comp.solid && this.isWalkable(o.x, o.y)) {
+      out.push({ x: o.x, y: o.y });
+      seen.add(`${o.x},${o.y}`);
+    }
     for (let dy = 0; dy < o.wy; dy++)
       for (let dx = 0; dx < o.wx; dx++) {
         const fx = o.x + dx;

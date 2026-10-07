@@ -1,4 +1,4 @@
-import type { Item } from "../items/types";
+import { type Item, itemName } from "../items/types";
 import { el } from "./dom";
 
 const CATEGORY_LABEL: Record<string, string> = {
@@ -7,7 +7,11 @@ const CATEGORY_LABEL: Record<string, string> = {
   firearm: "Firearm",
   ammo: "Ammo",
   medical: "Medical",
-  tool: "Item",
+  tool: "Tool",
+  part: "Car Part",
+  key: "Key",
+  book: "Book",
+  material: "Material",
 };
 
 export function categoryLabel(item: Item): string {
@@ -26,7 +30,7 @@ export class Tooltip {
     const d = item.def;
     const n = this.node;
     n.innerHTML = "";
-    el("div", "t-name", n, count > 1 ? `${d.name} (${count})` : d.name);
+    el("div", "t-name", n, count > 1 ? `${itemName(item)} (${count})` : itemName(item));
     el("div", "t-desc", n, d.description);
     const stat = (label: string, value: string) => {
       const row = el("div", "t-stat", n);
@@ -39,6 +43,9 @@ export class Tooltip {
     if (d.damage !== undefined) stat("Damage", d.damage.toFixed(1));
     if (item.condition !== undefined) stat("Condition", `${Math.round(item.condition * 100)}%`);
     if (d.ammo) stat("Ammo", d.ammo.replace(/_/g, " "));
+    if (d.capacity) stat("Gas", `${(item.fuel ?? 0).toFixed(1)} / ${d.capacity} L`);
+    if (item.rounds !== undefined) stat("Rounds", String(item.rounds));
+    if (d.teaches) stat("Teaches", d.teaches);
     n.hidden = false;
     this.move(x, y);
   }

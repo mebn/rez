@@ -55,16 +55,28 @@ export function makeWindow(style: WallStyle): EdgeComponent {
     name: `${style.name} Window`,
     category: "window",
     height: WALL_H,
-    states: ["default"],
+    // default = intact glass, broken = jagged shards left in the frame, open = frame cleared
+    states: ["default", "broken", "open"],
     blocksMovement: () => true,
-    draw(f) {
+    draw(f, state) {
       const [lo, hi] = [32, 72];
       const frame = "#d9d4c4";
       wallSlab(f, style, -WALL_T, 5, 0, WALL_H);
       wallSlab(f, style, 5, 27, 0, lo);
       wallSlab(f, style, 5, 27, hi, WALL_H);
       // glass
-      f.face("front", 5, -0.5, lo, 27, 0.5, hi, (ctx, w, h) => {
+      if (state === "broken")
+        f.face("front", 5, -0.5, lo, 27, 0.5, hi, (ctx, w, h) => {
+          ctx.fillStyle = "rgba(170,200,210,0.7)";
+          for (const [x0, y0, x1, y1, x2, y2] of [[0, 0, w * 0.35, 0, 0, h * 0.4], [w, 0, w, h * 0.5, w * 0.7, 0], [0, h, w * 0.4, h, 0, h * 0.7], [w, h, w * 0.75, h, w, h * 0.6]]) {
+            ctx.beginPath();
+            ctx.moveTo(x0, y0);
+            ctx.lineTo(x1, y1);
+            ctx.lineTo(x2, y2);
+            ctx.fill();
+          }
+        });
+      else if (state !== "open") f.face("front", 5, -0.5, lo, 27, 0.5, hi, (ctx, w, h) => {
         const g = ctx.createLinearGradient(0, 0, w, h);
         g.addColorStop(0, "rgba(170,200,210,0.55)");
         g.addColorStop(0.5, "rgba(120,150,165,0.45)");

@@ -1,3 +1,4 @@
+import { AUTO } from "./auto";
 import { FOOD } from "./food";
 import { MISC } from "./misc";
 import { pixelize } from "../art/pixel";
@@ -5,7 +6,7 @@ import type { Item, ItemDef } from "./types";
 import { WEAPONS } from "./weapons";
 
 const defs = new Map<string, ItemDef>();
-for (const d of [...FOOD, ...WEAPONS, ...MISC]) {
+for (const d of [...FOOD, ...WEAPONS, ...MISC, ...AUTO]) {
   if (defs.has(d.id)) throw new Error(`Duplicate item id ${d.id}`);
   defs.set(d.id, d);
 }

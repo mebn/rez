@@ -1,5 +1,5 @@
 import type { Facing, Side } from "../core/types";
-import type { EdgePlacement, MapData, ObjectPlacement } from "../world/map-data";
+import type { EdgePlacement, MapData, ObjectPlacement, VehiclePlacement } from "../world/map-data";
 
 type EdgeDraft =
   | { kind: "wall" | "window"; x: number; y: number; side: Side; exterior: string }
@@ -24,6 +24,7 @@ export class MapBuilder {
   private zone: (string | null)[];
   private edges = new Map<string, EdgeDraft>();
   private objects: ObjectPlacement[] = [];
+  private vehicles: VehiclePlacement[] = [];
 
   constructor(
     private name: string,
@@ -126,6 +127,11 @@ export class MapBuilder {
     return this;
   }
 
+  vehicle(v: VehiclePlacement): this {
+    this.vehicles.push(v);
+    return this;
+  }
+
   build(spawn: { x: number; y: number }): MapData {
     const edges: EdgePlacement[] = [];
     for (const e of this.edges.values()) {
@@ -148,6 +154,7 @@ export class MapBuilder {
       tiles: this.tiles,
       edges,
       objects: this.objects,
+      vehicles: this.vehicles,
       spawn,
     };
   }

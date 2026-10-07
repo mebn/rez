@@ -24,6 +24,29 @@ function blade(c: Ctx, top: number, bottom: number, width: number, color = STEEL
 
 export const WEAPONS: ItemDef[] = [
   melee({
+    id: "sledgehammer", name: "Sledgehammer", weight: 4.5, damage: 2.4, durability: 60,
+    description: "Ten pounds of steel on a stick. Knocks down walls, and anything standing between you and them.",
+    icon: (c) => diag(c, () => {
+      shape(c, vgrad(c, 8, 24, "#c0cbdc", "#8b9bb4", "#5a6988"), () => c.rect(8, -2, 16, 9));
+      handle(c, 16, 7, 35, 3.5, "#b86f50", 2);
+    }),
+  }),
+  melee({
+    id: "glass_shard", name: "Glass Shard", weight: 0.1, damage: 0.5, durability: 3,
+    description: "A jagged piece of window. Cuts both ways: you might slice your own hand.",
+    icon: (c) => {
+      shape(c, "rgba(192,203,220,0.9)", () => {
+        c.moveTo(10, 4);
+        c.lineTo(22, 10);
+        c.lineTo(18, 28);
+        c.lineTo(12, 20);
+        c.closePath();
+      });
+      c.fillStyle = "#ffffff";
+      c.fillRect(14, 9, 2, 7);
+    },
+  }),
+  melee({
     id: "screwdriver", name: "Screwdriver", weight: 0.3, damage: 0.6, durability: 10,
     description: "Flathead. Surprisingly effective when stabbed through an eye socket.",
     icon: (c) => diag(c, () => {

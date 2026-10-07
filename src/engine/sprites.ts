@@ -1,10 +1,12 @@
 import { Frame } from "../art/frame";
 import { Painter } from "../art/painter";
-import { drawCharacter, type CharacterLook, CHAR_SPRITE } from "../art/character";
+import { drawCharacter, drawCorpse, type CharacterLook, CHAR_SPRITE, CORPSE_SPRITE } from "../art/character";
 import { HALF_H, HALF_W } from "../core/iso";
 import { registry } from "../core/registry";
 import type { Facing, Side } from "../core/types";
 import { hash2 } from "../core/rng";
+import { drawVehicle, VEHICLE_SPRITE } from "../art/vehicle";
+import { VEHICLE_TYPES } from "../game/vehicles";
 
 /** A sprite recipe: size in world px, anchor (where world origin sits), and how to draw it. */
 export interface SpriteDef {
@@ -20,10 +22,21 @@ export const edgeKey = (id: string, side: Side, state: string) => `e|${id}|${sid
 export const objectKey = (id: string, facing: Facing, state: string) => `o|${id}|${facing}|${state}`;
 export const MARKER_KEY = "m|dest";
 export const charKey = (lookId: string, dir: number, frame: number) => `c|${lookId}|${dir}|${frame}`;
+/** A body on the ground, anchored at its centre (for a dead player before they rise). */
+export const corpseKey = (lookId: string, dir: number) => `k|${lookId}|${dir}`;
+/** Planks nailed across a door or window: n of 4. */
+export const barricadeKey = (side: Side, n: number) => `b|${side}|${n}`;
+export const vehicleKey = (typeId: string, dir16: number, paint: string) => `v|${typeId}|${dir16}|${paint}`;
 
 const looks = new Map<string, CharacterLook>();
 export function registerLook(id: string, look: CharacterLook): void {
   looks.set(id, look);
+}
+
+export function getLook(id: string): CharacterLook {
+  const look = looks.get(id);
+  if (!look) throw new Error(`Unknown character look ${id}`);
+  return look;
 }
 
 /** Build a sprite recipe from a key. Called lazily by the atlas the first time a key is used. */
@@ -94,9 +107,50 @@ export function spriteDef(key: string): SpriteDef {
         },
       };
     }
+    case "b": {
+      const side = parts[1] as Side;
+      const n = Number(parts[2]);
+      const pad = 8;
+      return {
+        w: HALF_W * 2 + pad * 2,
+        h: HALF_H * 2 + 92 + pad * 2,
+        ax: HALF_W + pad,
+        ay: 92 + pad,
+        draw(p) {
+          const f = new Frame(p, 1, 0, side === "N" ? "S" : "E");
+          // boards on the visible face, alternating tilt like they were nailed up in a hurry
+          const boards: [number, number][] = [[22, 4], [44, -4], [62, 3], [80, -3]];
+          for (let i = 0; i < n; i++) {
+            const [z, tilt] = boards[i];
+            f.box(-1, 3, z - tilt, 16, 5, z - tilt + 7, "#b86f50");
+            f.box(16, 3, z + tilt, 33, 5, z + tilt + 7, "#c28569");
+          }
+        },
+      };
+    }
+    case "v": {
+      const type = VEHICLE_TYPES[parts[1]];
+      const heading = (Number(parts[2]) * Math.PI) / 8;
+      const paint = parts[3];
+      return {
+        ...VEHICLE_SPRITE,
+        draw(p) {
+          drawVehicle(p, type.shape, paint, heading);
+        },
+      };
+    }
+    case "k": {
+      const look = getLook(parts[1]);
+      const dir = Number(parts[2]);
+      return {
+        ...CORPSE_SPRITE,
+        draw(p) {
+          drawCorpse(p.ctx, look, dir);
+        },
+      };
+    }
     case "c": {
-      const look = looks.get(parts[1]);
-      if (!look) throw new Error(`Unknown character look ${parts[1]}`);
+      const look = getLook(parts[1]);
       const dir = Number(parts[2]);
       const frame = Number(parts[3]);
       return {

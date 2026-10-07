@@ -51,10 +51,27 @@ class Heap {
 
 /**
  * A* over the tile grid with 8-way movement. Walls/fences block; closed doors are
- * passable at a small extra cost (the player opens them on the way through).
+ * passable at an extra cost (the player opens them on the way through, zombies bash them).
+ * With `doors: false` closed doors block like walls.
  * Returns the tile path excluding the start, or null if no goal is reachable.
  */
-export function findPath(world: World, start: Tile, goals: Tile[]): Tile[] | null {
+export function findPath(
+  world: World,
+  start: Tile,
+  goals: Tile[],
+  opts: { doors?: boolean; doorCost?: number; limit?: number; bashers?: boolean } = {},
+): Tile[] | null {
+  world.bashers = !!opts.bashers;
+  try {
+    return search(world, start, goals, opts);
+  } finally {
+    world.bashers = false;
+  }
+}
+
+function search(world: World, start: Tile, goals: Tile[], opts: { doors?: boolean; doorCost?: number; limit?: number }): Tile[] | null {
+  const doors = opts.doors ?? true;
+  const doorCost = opts.doorCost ?? 1.5;
   if (!goals.length) return null;
   const W = world.width;
   const goalSet = new Set(goals.map((g) => g.y * W + g.x));
@@ -77,7 +94,7 @@ export function findPath(world: World, start: Tile, goals: Tile[]): Tile[] | nul
   open.push(startI, h(startI));
   const closed = new Set<number>();
   let iterations = 0;
-  while (open.size && iterations++ < 20000) {
+  while (open.size && iterations++ < (opts.limit ?? 20000)) {
     const cur = open.pop();
     if (closed.has(cur)) continue;
     if (goalSet.has(cur)) {
@@ -93,12 +110,12 @@ export function findPath(world: World, start: Tile, goals: Tile[]): Tile[] | nul
     const cx = cur % W;
     const cy = (cur / W) | 0;
     for (const [dx, dy, cost] of DIRS) {
-      if (!world.canStep(cx, cy, dx, dy, true)) continue;
+      if (!world.canStep(cx, cy, dx, dy, doors)) continue;
       const ni = (cy + dy) * W + cx + dx;
       if (closed.has(ni)) continue;
       let c = cost;
       const e = dx === 0 || dy === 0 ? world.edgeBetween(cx, cy, dx, dy) : undefined;
-      if (e?.comp.door && e.comp.blocksMovement(e.state)) c += 1.5;
+      if (e && ((e.comp.door && e.comp.blocksMovement(e.state)) || (e.barricade ?? 0) > 0 || (world.bashers && e.comp.blocksMovement(e.state)))) c += doorCost;
       const g = gScore.get(cur)! + c;
       if (g < (gScore.get(ni) ?? Infinity)) {
         gScore.set(ni, g);

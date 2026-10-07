@@ -35,6 +35,11 @@ import { bench } from "./outdoor/bench";
 import { picnicTable } from "./outdoor/picnic-table";
 import { berryBush, bush, oakTree, pineTree } from "./nature/tree";
 import { car, carRed } from "./vehicles/car";
+import { corpse } from "./remains/corpse";
+import { gasPump } from "./auto/gas-pump";
+import { tireRack } from "./auto/tire-rack";
+import { partsShelf } from "./auto/parts-shelf";
+import { itemPile } from "./auto/item-pile";
 
 export function registerAllComponents(): void {
   registry.register(
@@ -49,5 +54,7 @@ export function registerAllComponents(): void {
     trashCan, dumpster, mailbox, woodpile, bench, picnicTable,
     oakTree, pineTree, bush, berryBush,
     car, carRed,
+    corpse,
+    gasPump, tireRack, partsShelf, itemPile,
   );
 }

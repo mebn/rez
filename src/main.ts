@@ -3,8 +3,9 @@ import { registerAllComponents } from "./components";
 import { Atlas } from "./engine/atlas";
 import { Camera } from "./engine/camera";
 import { Renderer } from "./engine/renderer";
-import { registerLook } from "./engine/sprites";
 import { Game } from "./game/game";
+import { registerSurvivorLooks } from "./game/survivor";
+import { registerZombieLooks } from "./game/zombies";
 import { buildStarterMap } from "./maps/starter";
 import { World } from "./world/world";
 
@@ -24,14 +25,8 @@ async function main(): Promise<void> {
   }
 
   registerAllComponents();
-  registerLook("player", {
-    skin: "#d9a786",
-    hair: "#4a3324",
-    shirt: "#6d7f8c",
-    pants: "#3f4f68",
-    shoes: "#2c2622",
-    hairStyle: "short",
-  });
+  registerSurvivorLooks();
+  registerZombieLooks();
 
   const atlas = new Atlas(renderer.device);
   renderer.setTexture(atlas.texture);
@@ -60,7 +55,7 @@ async function main(): Promise<void> {
   requestAnimationFrame(frame);
 
   // handy for poking at things from the console
-  Object.assign(window, { game, world });
+  Object.assign(window, { game, world, zombies: game.director });
 }
 
 main();

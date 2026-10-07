@@ -15,7 +15,23 @@ export interface MapData {
   tiles: number[];
   edges: EdgePlacement[];
   objects: ObjectPlacement[];
+  vehicles?: VehiclePlacement[];
   spawn: { x: number; y: number };
+}
+
+export interface VehiclePlacement {
+  type: string;
+  /** Centre of the car in tiles. */
+  x: number;
+  y: number;
+  /** Radians, 0 = +x (east), PI/2 = +y (south). */
+  heading: number;
+  paint?: string;
+  condition?: number;
+  /** Fraction of a full tank. */
+  fuel?: number;
+  /** Wheel conditions 0..100, or -1 for a missing wheel. */
+  wheels?: number[];
 }
 
 export interface EdgePlacement {

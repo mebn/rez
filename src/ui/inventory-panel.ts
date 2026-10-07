@@ -1,5 +1,5 @@
 import { itemIcon } from "../items/registry";
-import type { Item } from "../items/types";
+import { type Item, itemName } from "../items/types";
 import type { Inventory } from "../world/inventory";
 import { el, makeDraggable } from "./dom";
 import { categoryLabel, type Tooltip } from "./tooltip";
@@ -81,15 +81,17 @@ export class InventoryPanel {
     if (!inv) return;
     this.tooltip.hide();
     this.list.innerHTML = "";
-    const stacks = inv.stacks().sort((a, b) => a[0].def.category.localeCompare(b[0].def.category) || a[0].def.name.localeCompare(b[0].def.name));
+    const stacks = inv.stacks().sort((a, b) => a[0].def.category.localeCompare(b[0].def.category) || itemName(a[0]).localeCompare(itemName(b[0])));
     if (!stacks.length) el("div", "inv-empty", this.list, "Empty");
     for (const stack of stacks) {
       const item = stack[0];
       const row = el("div", "inv-row", this.list);
       const img = el("img", undefined, row);
       img.src = itemIcon(item.def);
-      const name = el("span", "name", row, stack.length > 1 ? `${item.def.name} (${stack.length})` : item.def.name);
+      const name = el("span", "name", row, stack.length > 1 ? `${itemName(item)} (${stack.length})` : itemName(item));
       if (this.equipped && stack.includes(this.equipped)) el("span", "tag", name, "Equipped");
+      if (item.fuel !== undefined && item.def.capacity) el("span", "tag", name, `${item.fuel.toFixed(1)} L`);
+      if (item.def.category === "part" && item.condition !== undefined) el("span", "tag", name, `${Math.round(item.condition * 100)}%`);
       el("span", "cat", row, categoryLabel(item));
       el("span", "w", row, (item.def.weight * stack.length).toFixed(1));
       row.addEventListener("mousedown", (e) => {
