@@ -4,19 +4,21 @@ const SHADER = /* wgsl */ `
 struct U { cam: vec4f, view: vec4f };
 @group(0) @binding(0) var<uniform> u: U;
 @group(0) @binding(1) var samp: sampler;
-@group(0) @binding(2) var tex: texture_2d<f32>;
+@group(0) @binding(2) var tex: texture_2d_array<f32>;
 
 struct VOut {
   @builtin(position) pos: vec4f,
   @location(0) uv: vec2f,
   @location(1) col: vec4f,
+  @location(2) @interpolate(flat) layer: u32,
 };
 
 @vertex
 fn vs(@builtin(vertex_index) vi: u32,
       @location(0) rect: vec4f,
       @location(1) uvr: vec4f,
-      @location(2) col: vec4f) -> VOut {
+      @location(2) col: vec4f,
+      @location(3) layer: f32) -> VOut {
   var corners = array<vec2f, 6>(
     vec2f(0.0, 0.0), vec2f(1.0, 0.0), vec2f(0.0, 1.0),
     vec2f(0.0, 1.0), vec2f(1.0, 0.0), vec2f(1.0, 1.0));
@@ -27,18 +29,19 @@ fn vs(@builtin(vertex_index) vi: u32,
   o.pos = vec4f(p.x / (u.view.x * 0.5), -p.y / (u.view.y * 0.5), 0.0, 1.0);
   o.uv = mix(uvr.xy, uvr.zw, c);
   o.col = col;
+  o.layer = u32(layer);
   return o;
 }
 
 @fragment
 fn fs(i: VOut) -> @location(0) vec4f {
-  let t = textureSample(tex, samp, i.uv);
+  let t = textureSample(tex, samp, i.uv, i.layer);
   let rgb = min(t.rgb * i.col.rgb, vec3f(t.a));
   return vec4f(rgb, t.a) * i.col.a;
 }
 `;
 
-const FLOATS = 12;
+const FLOATS = 13;
 const MAX_INSTANCES = 32768;
 
 /** Batched, single-draw-call sprite renderer. Sprites are pushed in back-to-front order. */
@@ -82,6 +85,7 @@ export class Renderer {
               { shaderLocation: 0, offset: 0, format: "float32x4" },
               { shaderLocation: 1, offset: 16, format: "float32x4" },
               { shaderLocation: 2, offset: 32, format: "float32x4" },
+              { shaderLocation: 3, offset: 48, format: "float32" },
             ],
           },
         ],
@@ -106,7 +110,7 @@ export class Renderer {
       size: this.data.byteLength,
       usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
     });
-    this.sampler = device.createSampler({ magFilter: "nearest", minFilter: "nearest" });
+    this.sampler = device.createSampler({ magFilter: "linear", minFilter: "linear" });
   }
 
   setTexture(texture: GPUTexture): void {
@@ -115,7 +119,7 @@ export class Renderer {
       entries: [
         { binding: 0, resource: { buffer: this.uniforms } },
         { binding: 1, resource: this.sampler },
-        { binding: 2, resource: texture.createView() },
+        { binding: 2, resource: texture.createView({ dimension: "2d-array" }) },
       ],
     });
   }
@@ -129,8 +133,8 @@ export class Renderer {
     if (this.count >= MAX_INSTANCES) return;
     const o = this.count++ * FLOATS;
     const d = this.data;
-    d[o] = Math.round(x - s.ax);
-    d[o + 1] = Math.round(y - s.ay);
+    d[o] = x - s.ax;
+    d[o + 1] = y - s.ay;
     d[o + 2] = s.w;
     d[o + 3] = s.h;
     d[o + 4] = s.u0;
@@ -141,6 +145,7 @@ export class Renderer {
     d[o + 9] = g;
     d[o + 10] = b;
     d[o + 11] = a;
+    d[o + 12] = s.layer;
   }
 
   end(camX: number, camY: number, zoom: number, viewW: number, viewH: number, clear: [number, number, number]): void {

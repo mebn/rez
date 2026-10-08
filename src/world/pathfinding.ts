@@ -127,9 +127,41 @@ function search(world: World, start: Tile, goals: Tile[], opts: { doors?: boolea
   return null;
 }
 
-/** Nearest walkable tile to (x, y) within a small radius, for clicks on blocked tiles. */
+/**
+ * Nearest walkable tile to (x, y) within a small radius, for clicks on blocked tiles.
+ * Spreads out from the clicked tile without crossing walls, so clicking furniture against a
+ * wall picks a spot in the same room rather than one on the far side of the wall.
+ */
 export function nearestWalkable(world: World, x: number, y: number, radius = 3): Tile | null {
   if (world.isWalkable(x, y)) return { x, y };
+  if (!world.inBounds(x, y)) return nearestByDistance(world, x, y, radius);
+  const W = world.width;
+  const seen = new Set<number>([y * W + x]);
+  const queue: Tile[] = [{ x, y }];
+  let best: Tile | null = null;
+  let bd = Infinity;
+  while (queue.length) {
+    const t = queue.shift()!;
+    for (const [dx, dy] of DIRS) {
+      if (dx !== 0 && dy !== 0) continue;
+      const nx = t.x + dx;
+      const ny = t.y + dy;
+      if (Math.abs(nx - x) > radius || Math.abs(ny - y) > radius || !world.inBounds(nx, ny)) continue;
+      const ni = ny * W + nx;
+      if (seen.has(ni) || !world.canStep(t.x, t.y, dx, dy, false, true)) continue;
+      seen.add(ni);
+      queue.push({ x: nx, y: ny });
+      const d = (nx - x) ** 2 + (ny - y) ** 2;
+      if (d < bd && world.isWalkable(nx, ny)) {
+        bd = d;
+        best = { x: nx, y: ny };
+      }
+    }
+  }
+  return best ?? nearestByDistance(world, x, y, radius);
+}
+
+function nearestByDistance(world: World, x: number, y: number, radius: number): Tile | null {
   let best: Tile | null = null;
   let bd = Infinity;
   for (let dy = -radius; dy <= radius; dy++)

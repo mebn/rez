@@ -1,7 +1,6 @@
 import { AUTO } from "./auto";
 import { FOOD } from "./food";
 import { MISC } from "./misc";
-import { pixelize } from "../art/pixel";
 import type { Item, ItemDef } from "./types";
 import { WEAPONS } from "./weapons";
 
@@ -32,15 +31,15 @@ export function createItem(id: string, condition?: number): Item {
 }
 
 const iconCache = new Map<string, string>();
-/** Icon as a data URL for the DOM UI: native 32px, palette-snapped, upscaled with pixelated CSS. */
+/** Icon as a data URL for the DOM UI, drawn at 2x so it stays crisp at HUD sizes. */
 export function itemIcon(def: ItemDef): string {
   let url = iconCache.get(def.id);
   if (!url) {
     const c = document.createElement("canvas");
-    c.width = c.height = 32;
-    const ctx = c.getContext("2d", { willReadFrequently: true })!;
+    c.width = c.height = 64;
+    const ctx = c.getContext("2d")!;
+    ctx.scale(2, 2);
     def.icon(ctx);
-    ctx.putImageData(pixelize(ctx.getImageData(0, 0, 32, 32)), 0, 0);
     url = c.toDataURL();
     iconCache.set(def.id, url);
   }

@@ -33,6 +33,10 @@ export class ContextMenu {
     n.style.top = `${Math.min(window.innerHeight - n.offsetHeight - 4, y)}px`;
   }
 
+  get open(): boolean {
+    return !this.node.hidden;
+  }
+
   hide(): void {
     this.node.hidden = true;
   }

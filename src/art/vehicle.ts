@@ -20,9 +20,9 @@ export interface VehicleShape {
 /** Sprite bounds for every vehicle; anchor is the centre of the car on the ground. */
 export const VEHICLE_SPRITE = { w: 150, h: 110, ax: 75, ay: 66 };
 
-const GLASS = "#3a4466";
-const TIRE = "#181425";
-const TRIM = "#8b9bb4";
+const GLASS = "#3b4650";
+const TIRE = "#1d1e1f";
+const TRIM = "#8c9094";
 
 /**
  * Draws a car as a handful of boxes rotated to `heading` (radians, 0 = +x), projected
@@ -88,8 +88,8 @@ export function drawVehicle(p: Painter, s: VehicleShape, paint: string, heading:
   // head and tail lights
   const frontVisible = f[0] + f[1] > 0;
   for (const side of [-1, 1]) {
-    if (frontVisible) box(L - 0.04, L + 0.01, side * W * 0.75 - 0.1, side * W * 0.75 + 0.1, 12, 17, "#fee761");
-    else box(-L - 0.01, -L + 0.04, side * W * 0.75 - 0.1, side * W * 0.75 + 0.1, 12, 17, "#e43b44");
+    if (frontVisible) box(L - 0.04, L + 0.01, side * W * 0.75 - 0.1, side * W * 0.75 + 0.1, 12, 17, "#e8e2b8");
+    else box(-L - 0.01, -L + 0.04, side * W * 0.75 - 0.1, side * W * 0.75 + 0.1, 12, 17, "#a8302a");
   }
   for (const w of wheels) if (near(w[1])) wheel(w);
 }

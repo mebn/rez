@@ -1,6 +1,7 @@
 export interface InputHandlers {
   leftClick(x: number, y: number): void;
-  rightDown(x: number, y: number): void;
+  /** shift: Shift was held, i.e. the player is running and just wants to move. */
+  rightDown(x: number, y: number, shift: boolean): void;
   rightDrag(x: number, y: number): void;
   move(x: number, y: number): void;
   wheel(delta: number): void;
@@ -16,13 +17,17 @@ export function bindInput(canvas: HTMLCanvasElement, h: InputHandlers): void {
     const r = canvas.getBoundingClientRect();
     return [e.clientX - r.left, e.clientY - r.top] as const;
   };
-  canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+  // page-wide: our own menu pops up under the cursor on mousedown, and on some platforms the
+  // browser fires contextmenu on mouseup, over that menu rather than the canvas
+  window.addEventListener("contextmenu", (e) => {
+    if (!(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement)) e.preventDefault();
+  });
   canvas.addEventListener("mousedown", (e) => {
     const [x, y] = pos(e);
     if (e.button === 0) h.leftClick(x, y);
     if (e.button === 2) {
       rightHeld = true;
-      h.rightDown(x, y);
+      h.rightDown(x, y, e.shiftKey);
     }
   });
   window.addEventListener("mouseup", (e) => {

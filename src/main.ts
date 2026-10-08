@@ -30,9 +30,14 @@ async function main(): Promise<void> {
 
   const atlas = new Atlas(renderer.device);
   renderer.setTexture(atlas.texture);
+  atlas.onGrow = (texture) => renderer.setTexture(texture);
   const camera = new Camera();
   const world = new World(buildStarterMap());
   const game = new Game(renderer, atlas, camera, world, canvas, ui);
+  game.load();
+  // save on the way out too, not just every few seconds
+  window.addEventListener("pagehide", () => game.save());
+  document.addEventListener("visibilitychange", () => document.visibilityState === "hidden" && game.save());
 
   const resize = () => {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);

@@ -4,7 +4,8 @@ import { MapBuilder } from "./builder";
 
 /**
  * "Maple Lane": a suburban house with a garage, a corner store across the road, a small
- * park, and further east a gas station and an auto repair shop.
+ * park, a two-storey family home past the park, and further east a gas station, an auto
+ * repair shop and a three-storey brick townhouse.
  * Coordinates: x runs east (down-right on screen), y runs south (down-left).
  */
 export function buildStarterMap(): MapData {
@@ -102,7 +103,7 @@ export function buildStarterMap(): MapData {
   b.place("toolbox", 27, 9);
   b.place("crate", 29, 8);
   b.place("crate", 29, 9);
-  b.vehicle({ type: "sedan", x: 26, y: 12.2, heading: Math.PI / 2, paint: "#a22633", condition: 85, fuel: 0.35 });
+  b.vehicle({ type: "sedan", x: 26, y: 12.2, heading: Math.PI / 2, paint: "#7d2a26", condition: 85, fuel: 0.35 });
 
   // driveway, bins, mailbox
   b.floor(25, 16, 28, 28, "concrete");
@@ -126,7 +127,7 @@ export function buildStarterMap(): MapData {
   b.place("bush", 21, 19);
 
   // --- street -------------------------------------------------------------
-  b.vehicle({ type: "sedan", x: 34, y: 31, heading: 0, paint: "#5a6988", condition: 70, fuel: 0.2 });
+  b.vehicle({ type: "sedan", x: 34, y: 31, heading: 0, paint: "#6b6f73", condition: 70, fuel: 0.2 });
   b.vehicle({ type: "compact", x: 6, y: 33, heading: Math.PI, condition: 60, fuel: 0.15, wheels: [80, 0, 75, 90] });
 
   // --- corner store -------------------------------------------------------
@@ -167,6 +168,80 @@ export function buildStarterMap(): MapData {
   b.place("tree_pine", 28, 42);
   b.place("tree_oak", 34, 39);
   b.place("bush", 25, 37);
+
+  // --- two-storey house (past the park) ----------------------------------
+  {
+    const up = b.storey(1);
+    // ground: living room and kitchen at the back, stair hall, bathroom and den at the front
+    b.room(47, 5, 53, 10, { floor: "wood_floor", wall: "wallpaper" });
+    b.room(53, 5, 57, 10, { floor: "kitchen_tile", wall: "kitchen" });
+    b.room(47, 10, 51, 14, { floor: "wood_floor", wall: "wallpaper" });
+    b.room(51, 10, 54, 14, { floor: "bathroom_tile", wall: "bathroom" });
+    b.room(54, 10, 57, 14, { floor: "carpet", wall: "wallpaper" });
+    b.door(49, 14, "N", "door_wood"); // front door
+    b.door(57, 8, "W", "door_glass"); // back door
+    b.door(49, 10, "N");
+    b.door(53, 7, "W");
+    b.door(51, 12, "W");
+    b.door(55, 10, "N");
+    for (const [x, y] of [[50, 5], [50, 14], [52, 14], [55, 14]]) b.window(x, y, "N");
+    for (const [x, y] of [[47, 7], [57, 6], [57, 12]]) b.window(x, y, "W");
+    b.stairs(47, 13, "N");
+
+    b.place("floor_lamp", 47, 5);
+    b.place("sofa", 48, 5, "S");
+    b.place("rug", 48, 6);
+    b.place("coffee_table", 48, 6);
+    b.place("tv", 48, 9, "N");
+    b.place("armchair", 51, 6, "W");
+    b.place("bookshelf", 52, 5, "S");
+    b.place("fridge", 53, 5, "S");
+    b.place("kitchen_counter", 54, 5, "S");
+    b.place("kitchen_sink", 55, 5, "S");
+    b.place("stove", 56, 5, "S");
+    b.place("kitchen_table", 55, 7);
+    b.place("chair", 54, 7, "E");
+    b.place("chair", 56, 7, "W");
+    b.place("trash_can", 56, 9);
+    b.place("vanity", 52, 10, "S");
+    b.place("toilet", 53, 11, "W");
+    b.place("bathtub", 51, 13, "S");
+    b.place("armchair", 56, 11, "W");
+    b.place("bookshelf", 56, 13, "W");
+    b.place("crate", 54, 13);
+
+    // first floor: two bedrooms over the back, landing + corridor, bathroom and study at the front
+    up.room(47, 5, 52, 10, { floor: "carpet", wall: "wallpaper" });
+    up.room(52, 5, 57, 10, { floor: "carpet", wall: "wallpaper" });
+    up.room(47, 10, 49, 14, { floor: "wood_floor", wall: "wallpaper" });
+    up.room(49, 10, 57, 12, { floor: "wood_floor", wall: "wallpaper" });
+    up.room(49, 12, 53, 14, { floor: "bathroom_tile", wall: "bathroom" });
+    up.room(53, 12, 57, 14, { floor: "wood_floor", wall: "wallpaper" });
+    up.open(49, 10, "W");
+    up.open(49, 11, "W");
+    up.door(48, 10, "N");
+    up.door(54, 10, "N");
+    up.door(50, 12, "N");
+    up.door(55, 12, "N");
+    for (const [x, y] of [[49, 5], [55, 5], [51, 14], [55, 14]]) up.window(x, y, "N");
+    for (const [x, y] of [[47, 7], [57, 8], [57, 11]]) up.window(x, y, "W");
+
+    up.place("nightstand", 47, 5, "E");
+    up.place("bed", 47, 6, "E");
+    up.place("dresser", 50, 5, "S");
+    up.place("wardrobe", 51, 9, "W");
+    up.place("wardrobe", 52, 5, "S");
+    up.place("nightstand", 56, 5, "W");
+    up.place("bed", 55, 6, "W");
+    up.place("dresser", 52, 9, "N");
+    up.place("vanity", 49, 13, "E");
+    up.place("toilet", 52, 12, "W");
+    up.place("bathtub", 51, 13, "S");
+    up.place("bookshelf", 53, 13, "E");
+    up.place("floor_lamp", 56, 12);
+    up.place("crate", 56, 13);
+  }
+  b.floor(49, 14, 50, 17, "concrete");
 
   // --- gas station --------------------------------------------------------
   b.floor(50, 17, 70, 28, "concrete");
@@ -214,10 +289,75 @@ export function buildStarterMap(): MapData {
 
   // --- east end -----------------------------------------------------------
   b.vehicle({ type: "pickup", x: 76, y: 32.2, heading: 0.35, condition: 30, fuel: 0.55, wheels: [0, 85, 70, 80] });
-  b.vehicle({ type: "sedan", x: 71, y: 20, heading: Math.PI / 2, paint: "#ead4aa", condition: 65, fuel: 0.3 });
-  for (const [x, y, t] of [[73, 8, "tree_oak"], [79, 14, "tree_pine"], [70, 4, "tree_pine"], [81, 24, "tree_oak"], [74, 41, "tree_oak"], [80, 38, "tree_pine"]] as const)
+  b.vehicle({ type: "sedan", x: 71, y: 20, heading: Math.PI / 2, paint: "#c8b994", condition: 65, fuel: 0.3 });
+  for (const [x, y, t] of [[81, 9, "tree_oak"], [79, 14, "tree_pine"], [70, 4, "tree_pine"], [81, 24, "tree_oak"], [74, 41, "tree_oak"], [80, 38, "tree_pine"]] as const)
     b.place(t, x, y);
   b.place("bush", 68, 12);
+
+  // --- three-storey townhouse ------------------------------------------------
+  {
+    const brick = { exterior: "brick" };
+    const l1 = b.storey(1);
+    const l2 = b.storey(2);
+    // ground: living room, stair hall, kitchen
+    b.room(72, 3, 79, 7, { floor: "wood_floor", wall: "wallpaper", ...brick });
+    b.room(72, 7, 75, 11, { floor: "wood_floor", wall: "wallpaper", ...brick });
+    b.room(75, 7, 79, 11, { floor: "kitchen_tile", wall: "kitchen", ...brick });
+    b.door(74, 11, "N", "door_wood");
+    b.door(74, 7, "N");
+    b.door(75, 9, "W");
+    for (const [x, y] of [[73, 3], [77, 3]]) b.window(x, y, "N");
+    for (const [x, y] of [[79, 5], [79, 9], [72, 9]]) b.window(x, y, "W");
+    b.stairs(73, 10, "N");
+    b.place("floor_lamp", 72, 3);
+    b.place("sofa", 73, 3, "S");
+    b.place("rug", 73, 4);
+    b.place("coffee_table", 73, 4);
+    b.place("tv", 73, 6, "N");
+    b.place("armchair", 76, 4, "W");
+    b.place("bookshelf", 78, 3, "S");
+    b.place("fridge", 78, 7, "W");
+    b.place("stove", 78, 8, "W");
+    b.place("kitchen_sink", 78, 9, "W");
+    b.place("kitchen_counter", 78, 10, "W");
+    b.place("kitchen_table", 76, 9);
+    b.place("chair", 76, 10, "N");
+    b.floor(74, 11, 75, 28, "concrete");
+
+    // first floor: bedroom, bathroom, and a long landing with the next flight up
+    l1.room(72, 3, 76, 7, { floor: "carpet", wall: "wallpaper", ...brick });
+    l1.room(76, 3, 79, 7, { floor: "bathroom_tile", wall: "bathroom", ...brick });
+    l1.room(72, 7, 79, 11, { floor: "wood_floor", wall: "wallpaper", ...brick });
+    l1.door(74, 7, "N");
+    l1.door(77, 7, "N");
+    for (const [x, y] of [[73, 3], [75, 3]]) l1.window(x, y, "N");
+    for (const [x, y] of [[72, 5], [79, 9], [72, 10]]) l1.window(x, y, "W");
+    b.stairs(78, 10, "N", 1);
+    l1.place("nightstand", 72, 3, "E");
+    l1.place("bed", 72, 4, "E");
+    l1.place("wardrobe", 75, 3, "S");
+    l1.place("vanity", 76, 3, "S");
+    l1.place("toilet", 78, 3, "S");
+    l1.place("bathtub", 78, 4, "W");
+    l1.place("bookshelf", 76, 10, "N");
+
+    // top floor: main bedroom and a storage room off the stair hall
+    l2.room(72, 3, 79, 7, { floor: "carpet", wall: "wallpaper", ...brick });
+    l2.room(72, 7, 75, 11, { floor: "wood_floor", wall: "wallpaper", ...brick });
+    l2.room(75, 7, 79, 11, { floor: "wood_floor", wall: "wallpaper", ...brick });
+    l2.door(76, 7, "N");
+    l2.door(75, 8, "W");
+    for (const [x, y] of [[74, 3], [77, 3]]) l2.window(x, y, "N");
+    for (const [x, y] of [[72, 9], [79, 5]]) l2.window(x, y, "W");
+    l2.place("dresser", 72, 3, "S");
+    l2.place("wardrobe", 74, 3, "S");
+    l2.place("nightstand", 78, 3, "W");
+    l2.place("bed", 77, 4, "W");
+    l2.place("crate", 72, 10);
+    l2.place("crate", 73, 10);
+    l2.place("crate", 72, 9);
+    l2.place("metal_shelf", 74, 10, "N");
+  }
   b.place("bush", 77, 27);
 
   return b.build({ x: 16, y: 11 });

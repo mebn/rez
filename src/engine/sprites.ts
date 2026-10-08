@@ -1,6 +1,6 @@
 import { Frame } from "../art/frame";
 import { Painter } from "../art/painter";
-import { drawCharacter, drawCorpse, type CharacterLook, CHAR_SPRITE, CORPSE_SPRITE } from "../art/character";
+import { drawCharacter, drawCorpse, type CharacterLook, type Stance, CHAR_SPRITE, CORPSE_SPRITE } from "../art/character";
 import { HALF_H, HALF_W } from "../core/iso";
 import { registry } from "../core/registry";
 import type { Facing, Side } from "../core/types";
@@ -21,7 +21,9 @@ export const floorKey = (id: string, variant: number) => `f|${id}|${variant}`;
 export const edgeKey = (id: string, side: Side, state: string) => `e|${id}|${side}|${state}`;
 export const objectKey = (id: string, facing: Facing, state: string) => `o|${id}|${facing}|${state}`;
 export const MARKER_KEY = "m|dest";
-export const charKey = (lookId: string, dir: number, frame: number) => `c|${lookId}|${dir}|${frame}`;
+/** held: id of the item in the hands, "" for none. */
+export const charKey = (lookId: string, dir: number, frame: number, stance: Stance = "stand", held = "") =>
+  `c|${lookId}|${dir}|${frame}|${stance}|${held}`;
 /** A body on the ground, anchored at its centre (for a dead player before they rise). */
 export const corpseKey = (lookId: string, dir: number) => `k|${lookId}|${dir}`;
 /** Planks nailed across a door or window: n of 4. */
@@ -55,7 +57,7 @@ export function spriteDef(key: string): SpriteDef {
           p.plane([0, 0, 0], [1 / 32, 0, 0], [0, 1 / 32, 0], (ctx) => {
             // slight overdraw hides seams between neighbouring tiles
             ctx.beginPath();
-            ctx.rect(-0.6, -0.6, 33.2, 33.2);
+            ctx.rect(-1, -1, 34, 34);
             ctx.clip();
             comp.draw(ctx, variant, hash2(variant, 7, comp.id.length));
           });
@@ -153,10 +155,12 @@ export function spriteDef(key: string): SpriteDef {
       const look = getLook(parts[1]);
       const dir = Number(parts[2]);
       const frame = Number(parts[3]);
+      const stance = (parts[4] ?? "stand") as Stance;
+      const held = parts[5] ?? "";
       return {
         ...CHAR_SPRITE,
         draw(p) {
-          drawCharacter(p.ctx, look, dir, frame);
+          drawCharacter(p.ctx, look, dir, frame, stance, held);
         },
       };
     }

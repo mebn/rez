@@ -1,4 +1,4 @@
-import { IDLE_FRAME, WALK_FRAMES } from "../art/character";
+import { IDLE_FRAME, STAGGER_FRAME, WALK_FRAMES } from "../art/character";
 import { registerLook } from "../engine/sprites";
 import type { Item } from "../items/types";
 import { findPath, nearestWalkable, type Tile } from "../world/pathfinding";
@@ -12,14 +12,14 @@ function dirFromVec(dx: number, dy: number): number {
 const rand = (lo: number, hi: number) => lo + Math.random() * (hi - lo);
 const randInt = (lo: number, hi: number) => Math.floor(rand(lo, hi + 1));
 
-// colours picked straight from the palette so the grey, dead skin survives pixelisation
+// sallow, grey-green dead skin and dirty, faded clothes
 const ZOMBIE_LOOKS = [
-  { skin: "#8b9bb4", hair: "#3e2731", shirt: "#733e39", pants: "#3a4466", shoes: "#181425", hairStyle: "short" },
-  { skin: "#c0cbdc", hair: "#68386c", shirt: "#265c42", pants: "#262b44", shoes: "#3e2731", hairStyle: "long" },
-  { skin: "#8b9bb4", hair: "#181425", shirt: "#5a6988", pants: "#733e39", shoes: "#181425", hairStyle: "bald" },
-  { skin: "#c0cbdc", hair: "#b86f50", shirt: "#3e8948", pants: "#3a4466", shoes: "#3e2731", hairStyle: "short" },
-  { skin: "#8b9bb4", hair: "#3e2731", shirt: "#c28569", pants: "#262b44", shoes: "#181425", hairStyle: "long" },
-  { skin: "#c0cbdc", hair: "#181425", shirt: "#124e89", pants: "#5a6988", shoes: "#3e2731", hairStyle: "short" },
+  { skin: "#9aa08a", hair: "#3b2e26", shirt: "#6b4a3c", pants: "#3d4452", shoes: "#2a2622", hairStyle: "short" },
+  { skin: "#b3b19c", hair: "#4a3a40", shirt: "#47604c", pants: "#2e3340", shoes: "#3a2e28", hairStyle: "long" },
+  { skin: "#8a947e", hair: "#1e1a18", shirt: "#62686e", pants: "#5a4436", shoes: "#24211f", hairStyle: "bald" },
+  { skin: "#a9ab94", hair: "#8a5a3c", shirt: "#5a6e48", pants: "#3a4250", shoes: "#3a2e28", hairStyle: "short" },
+  { skin: "#929a86", hair: "#3b2e26", shirt: "#a08268", pants: "#2e3340", shoes: "#24211f", hairStyle: "long" },
+  { skin: "#b3b19c", hair: "#1e1a18", shirt: "#3e5068", pants: "#585e66", shoes: "#3a2e28", hairStyle: "short" },
 ] as const;
 
 export function registerZombieLooks(): void {
@@ -78,6 +78,7 @@ export class Zombie {
   }
 
   animFrame(): number {
+    if (this.stagger > 0) return STAGGER_FRAME + (this.stagger > 0.3 ? 0 : 1);
     if (this.climbTo) return 4;
     if (this.banging) return Math.floor(this.bangTime * 4) % 2 ? 2 : 6;
     if (this.windup > 0) return 2;
@@ -179,8 +180,8 @@ export class ZombieDirector {
     if (i >= 0) this.zombies.splice(i, 1);
   }
 
-  /** Hit a zombie. Returns true if it died. */
-  damage(z: Zombie, amount: number, fromX: number, fromY: number): boolean {
+  /** Hit a zombie, knocking it back `knock` tiles. Returns true if it died. */
+  damage(z: Zombie, amount: number, fromX: number, fromY: number, knock = 0.3): boolean {
     z.hp -= amount;
     z.flash = 0.15;
     z.stagger = 0.55;
@@ -188,7 +189,7 @@ export class ZombieDirector {
     if (z.hp <= 0) return true;
     // knocked back a little, and now it's angry
     const d = Math.hypot(z.x - fromX, z.y - fromY) || 1;
-    this.shove(z, ((z.x - fromX) / d) * 0.3, ((z.y - fromY) / d) * 0.3);
+    this.shove(z, ((z.x - fromX) / d) * knock, ((z.y - fromY) / d) * knock);
     z.mode = "chase";
     z.lastSeen = { x: fromX, y: fromY };
     z.memory = 8;
@@ -423,21 +424,26 @@ export class ZombieDirector {
       z.dir = dirFromVec(dx, dy);
       if (z.windup <= 0) {
         // plenty of grabs miss
-        if (p.alive && d < ATTACK_RANGE + p.radius + 0.25 && Math.random() < 0.5 && this.world.canSee(z.x, z.y, p.x, p.y)) this.hooks.attack(z);
+        if (p.alive && d < ATTACK_RANGE + p.radius + 0.25 && Math.random() < 0.5 && this.world.canReach(z.x, z.y, p.x, p.y)) this.hooks.attack(z);
         z.attackCd = rand(2, 3);
       }
       return;
     }
 
     if (sees) {
-      z.banging = null;
       z.dir = dirFromVec(dx, dy);
-      if (d < ATTACK_RANGE + p.radius) {
-        if (z.attackCd <= 0) z.windup = 0.6;
+      if (this.world.canReach(z.x, z.y, p.x, p.y)) {
+        z.banging = null;
+        if (d < ATTACK_RANGE + p.radius) {
+          if (z.attackCd <= 0) z.windup = 0.6;
+          return;
+        }
+        // close enough to lunge straight at them
+        this.steer(z, dx / d, dy / d, z.chaseSpeed * dt);
         return;
       }
-      // close enough to lunge straight at them
-      this.steer(z, dx / d, dy / d, z.chaseSpeed * dt);
+      // right there behind glass or a doorway: find a way round, or bash through
+      this.travel(z, dt, { x: Math.floor(p.x), y: Math.floor(p.y) }, z.chaseSpeed, true, () => {});
       return;
     }
 

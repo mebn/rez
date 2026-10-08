@@ -1,5 +1,6 @@
 import { doorGlass, doorWhite, doorWood } from "./door";
 import { fencePicket, fenceWood } from "./fence";
+import { railingWood } from "./stairs";
 import { makeWall, makeWindow } from "./wall";
 import { WALL_STYLES } from "./wall-styles";
 
@@ -11,4 +12,5 @@ export const edges = [
   doorGlass,
   fencePicket,
   fenceWood,
+  railingWood,
 ];

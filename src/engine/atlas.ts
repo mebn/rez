@@ -1,5 +1,4 @@
 import { Painter, SS } from "../art/painter";
-import { pixelize } from "../art/pixel";
 import { spriteDef } from "./sprites";
 
 export interface Sprite {
@@ -9,6 +8,8 @@ export interface Sprite {
   h: number;
   ax: number;
   ay: number;
+  /** Atlas page (texture array layer). */
+  layer: number;
   /** Normalised atlas UVs. */
   u0: number;
   v0: number;
@@ -18,16 +19,21 @@ export interface Sprite {
   mask: Uint8Array;
 }
 
-const SIZE = 4096;
+const SIZE = 2048;
 const GAP = 2;
 
 /**
- * Lazily rasterises sprite recipes with Canvas2D and packs them into one GPU texture
- * with a simple shelf packer. New sprites are uploaded the first time they're requested.
+ * Lazily rasterises sprite recipes with Canvas2D and packs them into a GPU texture array with
+ * a simple shelf packer. New sprites are uploaded the first time they're requested, and a page
+ * is added whenever the current one fills up.
  */
 export class Atlas {
-  readonly texture: GPUTexture;
+  texture: GPUTexture;
+  /** Called with the new texture whenever a page is added, so the renderer can rebind it. */
+  onGrow?: (texture: GPUTexture) => void;
+  private layers = 1;
   private sprites = new Map<string, Sprite>();
+  private layer = 0;
   private shelfX = GAP;
   private shelfY = GAP;
   private shelfH = 0;
@@ -35,11 +41,27 @@ export class Atlas {
   private ctx = this.canvas.getContext("2d", { willReadFrequently: true })!;
 
   constructor(private device: GPUDevice) {
-    this.texture = device.createTexture({
-      size: [SIZE, SIZE],
+    this.texture = this.createTexture(this.layers);
+  }
+
+  private createTexture(layers: number): GPUTexture {
+    return this.device.createTexture({
+      size: [SIZE, SIZE, layers],
       format: "rgba8unorm",
-      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.COPY_SRC | GPUTextureUsage.RENDER_ATTACHMENT,
     });
+  }
+
+  /** Add a page: copy every existing page into a bigger array and swap it in. */
+  private grow(): void {
+    const next = this.createTexture(this.layers + 1);
+    const enc = this.device.createCommandEncoder();
+    enc.copyTextureToTexture({ texture: this.texture }, { texture: next }, [SIZE, SIZE, this.layers]);
+    this.device.queue.submit([enc.finish()]);
+    this.texture.destroy();
+    this.texture = next;
+    this.layers++;
+    this.onGrow?.(next);
   }
 
   get(key: string): Sprite {
@@ -55,6 +77,7 @@ export class Atlas {
     const def = spriteDef(key);
     const pw = Math.ceil(def.w * SS);
     const ph = Math.ceil(def.h * SS);
+    if (pw + GAP * 2 > SIZE || ph + GAP * 2 > SIZE) throw new Error(`Sprite ${key} is too big for the atlas`);
     if (this.canvas.width < pw || this.canvas.height < ph) {
       this.canvas = new OffscreenCanvas(Math.max(pw, this.canvas.width), Math.max(ph, this.canvas.height));
       this.ctx = this.canvas.getContext("2d", { willReadFrequently: true })!;
@@ -66,26 +89,30 @@ export class Atlas {
     def.draw(new Painter(ctx as unknown as CanvasRenderingContext2D, def.ax, def.ay));
     ctx.restore();
 
-    // shelf pack
+    // shelf pack, moving to a fresh page when this one is full
     if (this.shelfX + pw + GAP > SIZE) {
       this.shelfX = GAP;
       this.shelfY += this.shelfH + GAP;
       this.shelfH = 0;
     }
-    if (this.shelfY + ph + GAP > SIZE) throw new Error("Sprite atlas full");
+    if (this.shelfY + ph + GAP > SIZE) {
+      this.layer++;
+      this.shelfX = this.shelfY = GAP;
+      this.shelfH = 0;
+      if (this.layer >= this.layers) this.grow();
+    }
     const x = this.shelfX;
     const y = this.shelfY;
     this.shelfX += pw + GAP;
     this.shelfH = Math.max(this.shelfH, ph);
 
-    const img = pixelize(ctx.getImageData(0, 0, pw, ph));
-    ctx.putImageData(img, 0, 0);
+    const img = ctx.getImageData(0, 0, pw, ph);
     const mask = new Uint8Array(pw * ph);
     for (let i = 0; i < mask.length; i++) mask[i] = img.data[i * 4 + 3];
 
     this.device.queue.copyExternalImageToTexture(
       { source: this.canvas, origin: { x: 0, y: 0 } },
-      { texture: this.texture, origin: { x, y }, premultipliedAlpha: true },
+      { texture: this.texture, origin: { x, y, z: this.layer }, premultipliedAlpha: true },
       [pw, ph],
     );
 
@@ -95,6 +122,7 @@ export class Atlas {
       h: ph / SS,
       ax: def.ax,
       ay: def.ay,
+      layer: this.layer,
       u0: x / SIZE,
       v0: y / SIZE,
       u1: (x + pw) / SIZE,

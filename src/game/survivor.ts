@@ -1,3 +1,4 @@
+import { mix } from "../art/color";
 import type { CharacterLook } from "../art/character";
 import { registerLook } from "../engine/sprites";
 
@@ -99,11 +100,9 @@ export function registerSurvivorLooks(): void {
   });
 }
 
-/** Dead skin in palette greys: lighter skin goes pale, darker skin goes slate. */
+/** Dead skin: the living tone drained toward a sallow grey-green. */
 function zombieSkin(hex: string): string {
-  const n = parseInt(hex.slice(1), 16);
-  const lum = 0.3 * ((n >> 16) & 255) + 0.59 * ((n >> 8) & 255) + 0.11 * (n & 255);
-  return lum > 170 ? "#c0cbdc" : lum > 110 ? "#8b9bb4" : "#5a6988";
+  return mix(hex, "#8f9a82", 0.65);
 }
 
 /** XP needed to go from `level` to `level + 1`. */

@@ -67,22 +67,27 @@ export class World {
   private uid = 1;
   readonly seed: number;
 
-  constructor(readonly data: MapData) {
+  /** One World per storey; `level` 0 is the ground, upper storeys come from data.levels. */
+  constructor(
+    readonly data: MapData,
+    readonly level = 0,
+  ) {
     this.width = data.width;
     this.height = data.height;
-    this.seed = data.seed;
-    this.floors = data.tiles.map((t, i) => {
+    this.seed = data.seed + level * 7919;
+    const layer = level === 0 ? data : data.levels![level - 1];
+    this.floors = layer.tiles.map((t, i) => {
       if (t < 0) return null;
-      const id = data.floorPalette[t];
+      const id = layer.floorPalette[t];
       const comp = registry.floor(id);
       const x = i % data.width;
       const y = Math.floor(i / data.width);
-      return { id, variant: hash2(x, y, data.seed) % comp.variants };
+      return { id, variant: hash2(x, y, this.seed) % comp.variants };
     });
     this.solid = new Array(this.width * this.height).fill(null);
     this.vehicles = new Int32Array(this.width * this.height);
-    for (const e of data.edges) this.addEdge(e.type, e.x, e.y, e.side, e.state);
-    for (const o of data.objects) this.addObject(o);
+    for (const e of layer.edges) this.addEdge(e.type, e.x, e.y, e.side, e.state);
+    for (const o of layer.objects) this.addObject(o);
   }
 
   inBounds(x: number, y: number): boolean {
@@ -253,6 +258,25 @@ export class World {
    * checking every border crossed.
    */
   canSee(x0: number, y0: number, x1: number, y1: number): boolean {
+    return this.lineClear(x0, y0, x1, y1, (e) => this.blocksSight(e));
+  }
+
+  /** Can an arm get through this edge? Empty window frames and low fences, yes; walls, doors and glass, no. */
+  blocksReach(e: EdgeInstance | undefined): boolean {
+    if (!e) return false;
+    if ((e.barricade ?? 0) > 0) return true;
+    if (e.comp.category === "window") return e.state === "default";
+    if (e.comp.category === "fence") return e.comp.height >= 40;
+    return e.comp.blocksMovement(e.state);
+  }
+
+  /** Close enough to grab is not enough: nothing solid may stand between the two points. */
+  canReach(x0: number, y0: number, x1: number, y1: number): boolean {
+    return this.lineClear(x0, y0, x1, y1, (e) => this.blocksReach(e));
+  }
+
+  /** Walk the tile grid along a line, checking every border crossed. */
+  private lineClear(x0: number, y0: number, x1: number, y1: number, blocks: (e: EdgeInstance | undefined) => boolean): boolean {
     let tx = Math.floor(x0);
     let ty = Math.floor(y0);
     const ex = Math.floor(x1);
@@ -267,11 +291,11 @@ export class World {
     let tmy = sy > 0 ? (ty + 1 - y0) * tdy : sy < 0 ? (y0 - ty) * tdy : Infinity;
     for (let guard = 0; guard < 128 && (tx !== ex || ty !== ey); guard++) {
       if (tmx < tmy) {
-        if (this.blocksSight(this.edgeBetween(tx, ty, sx, 0))) return false;
+        if (blocks(this.edgeBetween(tx, ty, sx, 0))) return false;
         tx += sx;
         tmx += tdx;
       } else {
-        if (this.blocksSight(this.edgeBetween(tx, ty, 0, sy))) return false;
+        if (blocks(this.edgeBetween(tx, ty, 0, sy))) return false;
         ty += sy;
         tmy += tdy;
       }

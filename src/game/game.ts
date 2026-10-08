@@ -9,21 +9,26 @@ import { createItem } from "../items/registry";
 import { rollLoot } from "../items/loot";
 import { Rng } from "../core/rng";
 import { findPath, nearestWalkable } from "../world/pathfinding";
-import type { Interactable, ObjectInstance, World } from "../world/world";
+import { type Interactable, type ObjectInstance, World } from "../world/world";
+import { WALL_H } from "../components/structure/wall";
+import type { Facing } from "../core/types";
 import { Inventory } from "../world/inventory";
 import { ContextMenu, type MenuOption } from "../ui/context-menu";
 import { Hud } from "../ui/hud";
 import { InventoryPanel } from "../ui/inventory-panel";
 import { Tooltip } from "../ui/tooltip";
 import { HealthPanel } from "../ui/health-panel";
+import { SettingsPanel } from "../ui/settings-panel";
 import { SkillsPanel } from "../ui/skills-panel";
 import { type JobView, VehiclePanel } from "../ui/vehicle-panel";
 import { type Obstacle, Vehicle, WHEEL_NAMES } from "./vehicles";
 import type { EdgeInstance } from "../world/world";
 import type { Wound } from "./health";
+import type { Stance } from "../art/character";
 import { Player } from "./player";
-import { type SkillId, SKILLS, skillByName, Survivor } from "./survivor";
-import { type Zombie, ZombieDirector } from "./zombies";
+import { type Attributes, type SkillId, SKILLS, skillByName, Survivor, TRAITS } from "./survivor";
+import { Zombie, ZombieDirector } from "./zombies";
+import { loadItems, loadLevel, SAVE_KEY, saveItem, saveLevel, type SavedItem, type SavedLevel } from "./save";
 
 import { type Host, interactionsFor, isBottle, type Target } from "./interactions";
 
@@ -53,7 +58,12 @@ interface Drawable {
   fader?: { fade: number };
   occludes: boolean;
   tint?: [number, number, number];
+  /** Storey it stands on. */
+  level: number;
 }
+
+/** Depth keys per storey are offset by this, so a storey draws entirely over the one below. */
+const LEVEL_KEY = 100000;
 
 const BLADES = new Set(["screwdriver", "butter_knife", "kitchen_knife", "sharp_stick", "broken_bottle", "machete", "fire_axe", "garden_fork"]);
 /** How far a shot is heard, in tiles. */
@@ -73,7 +83,7 @@ interface WeaponInfo {
   noise: number;
 }
 // palette INK (#181425)
-const BG: [number, number, number] = [0.094, 0.078, 0.145];
+const BG: [number, number, number] = [0.043, 0.047, 0.043];
 
 export class Game {
   player: Player;
@@ -107,6 +117,14 @@ export class Game {
   private marker: { x: number; y: number; t: number } | null = null;
   private openContainer: ObjectInstance | null = null;
 
+  /** Every storey, ground first. */
+  readonly levels: World[];
+
+  /** The storey the player is on. */
+  get world(): World {
+    return this.levels[this.player?.level ?? 0];
+  }
+
   private hud: Hud;
   private tooltip: Tooltip;
   private menu: ContextMenu;
@@ -114,22 +132,25 @@ export class Game {
   private lootPanel: InventoryPanel;
   private healthPanel: HealthPanel;
   private skillsPanel: SkillsPanel;
+  private settingsPanel: SettingsPanel;
   private vehiclePanel: VehiclePanel;
 
   constructor(
     private renderer: Renderer,
     private atlas: Atlas,
     private camera: Camera,
-    readonly world: World,
+    /** The ground storey: streets, cars and the dead all live here. */
+    readonly ground: World,
     private canvas: HTMLCanvasElement,
     uiRoot: HTMLElement,
   ) {
-    this.player = new Player(world.data.spawn, new Survivor(0));
+    this.levels = [ground, ...(ground.data.levels ?? []).map((_, i) => new World(ground.data, i + 1))];
+    this.player = new Player(ground.data.spawn, new Survivor(0));
     const [sx, sy] = this.playerScreen();
     camera.x = sx;
     camera.y = sy;
 
-    this.director = new ZombieDirector(world, {
+    this.director = new ZombieDirector(ground, {
       attack: (z) => this.zombieAttack(z),
       doorBang: (e) => this.doorBang(e),
       doorBroken: (e) => {
@@ -141,7 +162,7 @@ export class Game {
       hordeEnters: (from) => {
         if (!this.player.dead) this.hud.say(`I can hear a lot of them... off to the ${from}.`, 4000);
       },
-    }, world.data.spawn);
+    }, ground.data.spawn);
 
     this.tooltip = new Tooltip(uiRoot);
     this.menu = new ContextMenu(uiRoot);
@@ -151,6 +172,7 @@ export class Game {
       () => this.equip(null),
       () => this.healthPanel.toggle(),
       () => this.skillsPanel.toggle(),
+      () => this.settingsPanel.toggle(),
       () => this.respawn(),
       { engine: () => this.toggleEngine(), hotwire: () => this.driving && this.runJob(this.driving, "hotwire"), exit: () => this.exitVehicle() },
     );
@@ -161,6 +183,7 @@ export class Game {
       hasPainkillers: () => !!this.findItem(["painkillers"]),
     });
     this.skillsPanel = new SkillsPanel(uiRoot);
+    this.settingsPanel = new SettingsPanel(uiRoot, () => this.newGame());
     this.vehiclePanel = new VehiclePanel(uiRoot, {
       jobs: (v) => this.jobs(v),
       run: (v, id) => this.runJob(v, id),
@@ -183,7 +206,7 @@ export class Game {
 
     bindInput(canvas, {
       leftClick: (x, y) => this.onLeftClick(x, y),
-      rightDown: (x, y) => this.onRightClick(x, y),
+      rightDown: (x, y, shift) => this.onRightClick(x, y, shift),
       rightDrag: (x, y) => this.moveTo(x, y, true),
       move: (x, y) => (this.mouse = { x, y }),
       wheel: (d) => this.camera.wheel(d),
@@ -215,10 +238,20 @@ export class Game {
     }
     // while driving, WASD / arrows / space belong to the car
     if (!this.driving) {
-      if (code === "KeyS") this.skillsPanel.toggle();
+      if (code === "KeyK") this.skillsPanel.toggle();
       if (code === "Space") this.attackNearest();
+      if (code === "KeyC" && !this.player.dead) {
+        this.player.cycleStance();
+        this.hud.say(this.player.stance === "stand" ? "Standing." : this.player.stance === "crouch" ? "Crouching." : "Crawling.", 900);
+      }
     }
     if (code === "Escape") {
+      // Esc closes whatever is open; with nothing open it brings up settings
+      const anyOpen =
+        this.vehiclePanel.open || this.menu.open || !!this.openContainer || this.playerPanel.open ||
+        this.healthPanel.open || this.skillsPanel.open || this.settingsPanel.open;
+      if (!anyOpen) return this.settingsPanel.toggle();
+      this.settingsPanel.hide();
       this.vehiclePanel.hide();
       this.menu.hide();
       this.closeContainer();
@@ -228,13 +261,41 @@ export class Game {
     }
   }
 
+  /** WASD / arrows walk relative to the screen: W is up the screen, D to the right. */
+  private steerKeys(): void {
+    const h = this.held;
+    const up = h.has("KeyW") || h.has("ArrowUp") ? 1 : 0;
+    const down = h.has("KeyS") || h.has("ArrowDown") ? 1 : 0;
+    const left = h.has("KeyA") || h.has("ArrowLeft") ? 1 : 0;
+    const right = h.has("KeyD") || h.has("ArrowRight") ? 1 : 0;
+    // screen (sx, sy) -> world tiles: x = sx/2 + sy, y = sy - sx/2 (iso is twice as wide)
+    const sx = right - left;
+    const sy = down - up;
+    const p = this.player;
+    if (!sx && !sy) {
+      if (this.steering) p.steer(null);
+      this.steering = false;
+      return;
+    }
+    if (!this.steering) {
+      // taking manual control drops whatever the mouse had queued
+      this.engaged = null;
+      this.marker = null;
+      this.cancelAction();
+    }
+    this.steering = true;
+    p.steer([sx + sy, sy - sx]);
+  }
+  private steering = false;
+
   private moveTo(sx: number, sy: number, quiet = false): void {
     this.menu.hide();
     if (this.player.dead || this.driving) return;
     this.engaged = null;
     this.cancelAction();
     const [wx, wy] = this.camera.toWorld(sx, sy);
-    const t = screenToTile(wx, wy);
+    // clicks land on the floor of the storey you're on
+    const t = screenToTile(wx, wy + this.player.level * WALL_H);
     const goal = nearestWalkable(this.world, Math.floor(t.x), Math.floor(t.y));
     if (!goal) return;
     const path = findPath(this.world, { x: this.player.tileX, y: this.player.tileY }, [goal]);
@@ -254,14 +315,21 @@ export class Game {
     const target = this.pick(sx, sy);
     if (!target) return;
     if (target.kind === "zombie") return this.engage(target.z);
+    if (target.kind === "vehicle") return this.approachVehicle(target.v, () => this.enterVehicle(target.v));
+    if (target.kind === "object" && target.obj.comp.id === "stairs_wood") return this.climbStairs(target.obj);
     if (target.kind === "object" && target.obj.comp.container && target.obj.comp.id !== "gas_pump") return this.approach(target);
     if (target.kind === "edge" && target.edge.comp.door && !target.edge.barricade && !target.edge.broken) return this.approach(target);
+    if (target.kind === "edge" && target.edge.comp.category === "window" && !target.edge.barricade && (target.edge.state === "default" || target.edge.state === "raised"))
+      return this.runInteraction(target, "window");
     this.interactionMenu(target, sx, sy);
   }
 
-  /** Right click on a thing opens its menu; on the ground (or a plain wall or fence) it walks. */
-  private onRightClick(sx: number, sy: number): void {
-    const target = this.player.dead || this.driving ? null : this.pick(sx, sy);
+  /**
+   * Right click on a thing opens its menu; on the ground (or a plain wall or fence) it walks.
+   * With Shift held you're running, so it always just moves.
+   */
+  private onRightClick(sx: number, sy: number, shift: boolean): void {
+    const target = shift || this.player.dead || this.driving ? null : this.pick(sx, sy);
     const plain = target?.kind === "edge" && (target.edge.comp.category === "wall" || target.edge.comp.category === "fence");
     if (target && target.kind !== "zombie" && !plain) {
       this.menu.hide();
@@ -274,6 +342,7 @@ export class Game {
     const opts: MenuOption[] = [];
     if (target.kind === "vehicle") opts.push(...this.vehicleOptions(target.v));
     if (target.kind === "object" && target.obj.comp.id === "gas_pump") opts.push(...this.pumpOptions(target.obj));
+    if (target.kind === "object" && target.obj.comp.id === "stairs_wood") opts.push({ label: "Go upstairs", action: () => this.climbStairs(target.obj) });
     for (const ia of interactionsFor(this.host, target)) {
       const odds = ia.time === 0 ? "" : ia.chance === null ? ` (${Math.round(ia.time)}s)` : ` (${Math.round(ia.chance * 100)}% · ${Math.round(ia.time)}s)`;
       opts.push(
@@ -342,6 +411,7 @@ export class Game {
       dropItems: (x, y, items) => this.dropItems(x, y, items),
       open: (o) => this.use({ kind: "object", obj: o }),
       toggleDoor: (e) => this.use({ kind: "edge", edge: e }),
+      sit: (o) => this.sit(o),
     };
   }
 
@@ -523,8 +593,15 @@ export class Game {
     const [wx, wy] = this.camera.toWorld(sx, sy);
     for (let i = this.drawables.length - 1; i >= 0; i--) {
       const d = this.drawables[i];
-      if (!d.target || (d.fader && d.fader.fade < 0.6)) continue;
+      if (!d.target || d.level !== this.player.level || (d.fader && d.fader.fade < 0.6)) continue;
       if (this.atlas.hit(d.sprite, wx - (d.x - d.sprite.ax), wy - (d.y - d.sprite.ay))) return d.target;
+    }
+    // a window or door faded out because you're standing right at it is still usable
+    for (let i = this.drawables.length - 1; i >= 0; i--) {
+      const d = this.drawables[i];
+      const t = d.target;
+      if (t?.kind !== "edge" || d.level !== this.player.level || !(t.edge.comp.door || t.edge.comp.category === "window")) continue;
+      if (this.atlas.hit(d.sprite, wx - (d.x - d.sprite.ax), wy - (d.y - d.sprite.ay))) return t;
     }
     return null;
   }
@@ -538,6 +615,7 @@ export class Game {
         e.broken && "broken",
         e.comp.category === "window" && e.state === "broken" && "smashed",
         e.comp.category === "window" && e.state === "open" && "no glass",
+        e.comp.category === "window" && e.state === "raised" && "open",
         e.barricade && `barricaded ${e.barricade}/4`,
       ].filter(Boolean);
       return notes.length ? `${e.comp.name} (${notes.join(", ")})` : e.comp.name;
@@ -550,16 +628,32 @@ export class Game {
   // ---------------------------------------------------------- simulation
 
   private playerScreen(): [number, number] {
-    return [isoX(this.player.x, this.player.y), isoY(this.player.x, this.player.y)];
+    const p = this.player;
+    const lift = this.driving ? 0 : p.level * WALL_H + this.stairLift();
+    const [x, y] = p.seat ? [p.seat.x, p.seat.y] : [p.x, p.y];
+    return [isoX(x, y), isoY(x, y, lift)];
   }
 
   update(dt: number): void {
     this.time += dt;
+    this.saveTick -= dt;
+    if (this.saveTick <= 0) {
+      this.saveTick = 15;
+      this.save();
+    }
     const p = this.player;
     if (this.driving) this.drive(dt);
+    p.wantsSprint = !this.driving && (this.held.has("ShiftLeft") || this.held.has("ShiftRight"));
+    if (!this.driving && !p.dead) this.steerKeys();
+    const from = { x: p.tileX, y: p.tileY };
     p.update(dt, this.world);
+    if (!p.dead && !this.driving && (p.tileX !== from.x || p.tileY !== from.y)) {
+      this.takeStairs(from);
+      this.stepOnGlass();
+    }
+    if (!p.dead && !this.driving) this.checkFall();
     this.updateVehicles(dt);
-    this.director.update(dt, { x: p.x, y: p.y, alive: !p.dead, noticeFactor: p.survivor.noticeFactor, radius: this.driving ? 1 : 0 });
+    this.director.update(dt, { x: p.x, y: p.y, alive: !p.dead && p.level === 0, noticeFactor: p.noticeFactor, radius: this.driving ? 1 : 0 });
     this.updateAction(dt);
     if (!p.dead && p.health.hp <= 0) this.die();
     if (!p.dead) this.updateCombat(dt);
@@ -589,7 +683,7 @@ export class Game {
       if (d > 1.6) this.closeContainer();
     }
 
-    this.hud.setVitals(p.survivor.name, p.dead ? 0 : p.health.hp);
+    this.hud.setVitals(p.survivor.name, p.dead ? 0 : p.health.hp, p.dead ? 0 : p.stamina);
     this.hud.setMoodles(p.dead ? [] : this.moodles());
     this.panelTick -= dt;
     if (this.panelTick <= 0) {
@@ -615,83 +709,112 @@ export class Game {
     this.hud.hover(this.hovered ? this.targetName(this.hovered) : null, this.mouse?.x ?? 0, this.mouse?.y ?? 0);
   }
 
+  /**
+   * Storeys drawn this frame: everything up to the player's, and the ones above too unless
+   * there's a ceiling over their head (then the house is cut away so you can see inside).
+   */
+  private visibleLevels(): number[] {
+    const p = this.player;
+    const out: number[] = [];
+    for (let l = 0; l < this.levels.length; l++) {
+      const w = this.levels[l];
+      if (l > p.level && !this.driving && w.floors[p.tileY * w.width + p.tileX]) break;
+      out.push(l);
+    }
+    return out;
+  }
+
   private buildDrawables(dt: number): void {
-    const { world, atlas, player } = this;
+    const { atlas, player } = this;
     const list: Drawable[] = [];
     const b = this.camera.bounds();
     const visible = (x: number, y: number, s: Sprite) =>
       x - s.ax < b.x1 && x - s.ax + s.w > b.x0 && y - s.ay < b.y1 && y - s.ay + s.h > b.y0;
 
-    for (const e of world.edges.values()) {
-      const s = atlas.get(edgeKey(e.comp.id, e.side, e.state));
-      const x = isoX(e.x, e.y);
-      const y = isoY(e.x, e.y);
-      if (!visible(x, y, s)) continue;
-      list.push({
-        key: (e.x + e.y) * 10 + (e.side === "N" ? 1 : 1.05),
-        sprite: s, x, y,
-        target: { kind: "edge", edge: e },
-        fader: e,
-        occludes: e.comp.height > 40,
-      });
-      if (e.barricade)
+    for (const level of this.visibleLevels()) {
+      const world = this.levels[level];
+      const lift = level * WALL_H;
+      const base = level * LEVEL_KEY;
+      for (const e of world.edges.values()) {
+        const s = atlas.get(edgeKey(e.comp.id, e.side, e.state));
+        const x = isoX(e.x, e.y);
+        const y = isoY(e.x, e.y, lift);
+        if (!visible(x, y, s)) continue;
         list.push({
-          key: (e.x + e.y) * 10 + (e.side === "N" ? 1.001 : 1.051),
-          sprite: atlas.get(barricadeKey(e.side, e.barricade)), x, y,
+          key: base + (e.x + e.y) * 10 + (e.side === "N" ? 1 : 1.05),
+          sprite: s, x, y,
           target: { kind: "edge", edge: e },
-          occludes: false,
+          fader: e,
+          occludes: e.comp.height > 40,
+          level,
         });
-    }
-    for (const o of world.objects) {
-      const s = atlas.get(objectKey(o.comp.id, o.facing, o.state));
-      const x = isoX(o.x, o.y);
-      const y = isoY(o.x, o.y);
-      if (!visible(x, y, s)) continue;
-      const layer = o.comp.layer ?? 2;
-      list.push({
-        // flat decals (rugs) go right after the floor
-        key: layer < 1 ? -1 : (o.x + o.wx - 1 + o.y + o.wy - 1) * 10 + layer,
-        sprite: s, x, y,
-        target: { kind: "object", obj: o },
-        fader: o,
-        occludes: o.comp.occludes ?? o.comp.height > 50,
-      });
-    }
+        if (e.barricade)
+          list.push({
+            key: base + (e.x + e.y) * 10 + (e.side === "N" ? 1.001 : 1.051),
+            sprite: atlas.get(barricadeKey(e.side, e.barricade)), x, y,
+            target: { kind: "edge", edge: e },
+            occludes: false,
+            level,
+          });
+      }
+      for (const o of world.objects) {
+        const s = atlas.get(objectKey(o.comp.id, o.facing, o.state));
+        const x = isoX(o.x, o.y);
+        const y = isoY(o.x, o.y, lift);
+        if (!visible(x, y, s)) continue;
+        const layer = o.comp.layer ?? 2;
+        list.push({
+          // flat decals (rugs) go right after the floor
+          key: base + (layer < 1 ? -1 : (o.x + o.wx - 1 + o.y + o.wy - 1) * 10 + layer),
+          sprite: s, x, y,
+          target: { kind: "object", obj: o },
+          fader: o,
+          occludes: o.comp.occludes ?? o.comp.height > 50,
+          level,
+        });
+      }
+      if (level !== 0) continue;
 
-    for (const v of this.vehicles) {
-      const s = atlas.get(vehicleKey(v.type.id, v.dir16, v.paint));
-      const x = isoX(v.x, v.y);
-      const y = isoY(v.x, v.y);
-      if (!visible(x, y, s)) continue;
-      list.push({
-        key: (Math.floor(v.x) + Math.floor(v.y)) * 10 + 2.5,
-        sprite: s, x, y,
-        target: { kind: "vehicle", v },
-        fader: v,
-        occludes: true,
-      });
-    }
+      for (const v of this.vehicles) {
+        const s = atlas.get(vehicleKey(v.type.id, v.dir16, v.paint));
+        const x = isoX(v.x, v.y);
+        const y = isoY(v.x, v.y);
+        if (!visible(x, y, s)) continue;
+        list.push({
+          key: (Math.floor(v.x) + Math.floor(v.y)) * 10 + 2.5,
+          sprite: s, x, y,
+          target: { kind: "vehicle", v },
+          fader: v,
+          occludes: true,
+          level,
+        });
+      }
 
-    for (const z of this.director.zombies) {
-      const x = isoX(z.x, z.y);
-      const y = isoY(z.x, z.y);
-      const lying = z.rise > 0;
-      const s = atlas.get(lying ? corpseKey(z.look, z.dir) : charKey(z.look, z.dir, z.animFrame()));
-      if (!visible(x, y, s)) continue;
-      list.push({
-        key: (z.tileX + z.tileY) * 10 + (lying ? 1 : 3 + ((z.x + z.y) % 1) * 0.4),
-        sprite: s, x, y,
-        target: lying ? undefined : { kind: "zombie", z },
-        occludes: false,
-        tint: z.flash > 0 ? [2.2, 0.7, 0.7] : undefined,
-      });
+      for (const z of this.director.zombies) {
+        const x = isoX(z.x, z.y);
+        const y = isoY(z.x, z.y);
+        const lying = z.rise > 0;
+        const s = atlas.get(lying ? corpseKey(z.look, z.dir) : charKey(z.look, z.dir, z.animFrame()));
+        if (!visible(x, y, s)) continue;
+        list.push({
+          key: (z.tileX + z.tileY) * 10 + (lying ? 1 : 3 + ((z.x + z.y) % 1) * 0.4),
+          sprite: s, x, y,
+          target: lying ? undefined : { kind: "zombie", z },
+          occludes: false,
+          tint: z.flash > 0 ? [2.2, 0.7, 0.7] : undefined,
+          level,
+        });
+      }
     }
 
     const [px, py] = this.playerScreen();
-    const playerKey = (player.tileX + player.tileY) * 10 + 3;
+    // on a staircase, draw over the steps you're standing on
+    const onStairs = this.stairLift() > 0 ? 25 : 0;
+    const seat = player.seat;
+    const playerKey = player.level * LEVEL_KEY + (seat ? seat.key : (player.tileX + player.tileY) * 10 + 3 + onStairs);
     if (!player.dead && !this.driving) {
-      const ps = atlas.get(charKey(player.survivor.look, player.dir, player.animFrame()));
-      list.push({ key: playerKey + ((player.x + player.y) % 1) * 0.4, sprite: ps, x: px, y: py, occludes: false });
+      const ps = atlas.get(charKey(player.survivor.look, seat ? seat.dir : player.dir, player.animFrame(), player.stance, player.equipped?.def.id ?? ""));
+      list.push({ key: playerKey + (seat ? 0 : ((player.x + player.y) % 1) * 0.4), sprite: ps, x: px, y: py, occludes: false, level: player.level });
     }
     list.sort((a, b) => a.key - b.key);
 
@@ -738,7 +861,8 @@ export class Game {
 
   private attackNearest(): void {
     const p = this.player;
-    if (p.dead) return;
+    // the dead walk the ground floor only
+    if (p.dead || p.level !== 0) return;
     const reach = Math.max(this.weapon().reach, 6);
     let best: Zombie | null = null;
     let bd = Infinity;
@@ -751,6 +875,113 @@ export class Game {
       }
     }
     if (best) this.engage(best);
+  }
+
+  /** Where each flight starts and ends, as tiles. */
+  private flights(): { z: number; b1: { x: number; y: number }; top: { x: number; y: number }; b0: { x: number; y: number } }[] {
+    const D: Record<Facing, [number, number]> = { N: [0, -1], S: [0, 1], E: [1, 0], W: [-1, 0] };
+    return (this.ground.data.stairs ?? []).map((s) => {
+      const [dx, dy] = D[s.dir];
+      return { z: s.z, b0: { x: s.x, y: s.y }, b1: { x: s.x + dx, y: s.y + dy }, top: { x: s.x + dx * 2, y: s.y + dy * 2 } };
+    });
+  }
+
+  /**
+   * Climbing onto the top step from the one below takes you up a storey; stepping from the
+   * landing back onto the flight takes you down. Arrival tiles aren't triggers, so no bouncing.
+   */
+  private takeStairs(from: { x: number; y: number }): void {
+    const p = this.player;
+    const at = (t: { x: number; y: number }) => p.tileX === t.x && p.tileY === t.y;
+    const was = (t: { x: number; y: number }) => from.x === t.x && from.y === t.y;
+    for (const f of this.flights()) {
+      if (p.level === f.z && at(f.top) && was(f.b1)) return this.changeLevel(f.z + 1, "Upstairs.");
+      if (p.level === f.z + 1 && at(f.b1) && was(f.top)) return this.changeLevel(f.z, "Downstairs.");
+    }
+  }
+
+  /** Walk to the foot of the flight and up it. */
+  private climbStairs(o: ObjectInstance): void {
+    const p = this.player;
+    const f = this.flights().find((f) => f.z === p.level && f.b0.x >= o.x && f.b0.x < o.x + o.wx && f.b0.y >= o.y && f.b0.y < o.y + o.wy);
+    if (!f) return;
+    this.engaged = null;
+    this.cancelAction();
+    const path = p.tileX === f.b1.x && p.tileY === f.b1.y ? [] : findPath(this.world, { x: p.tileX, y: p.tileY }, [f.b1]);
+    if (!path) return this.hud.say("I can't get there.", 1500);
+    this.marker = null;
+    p.walk([...path, f.top]);
+  }
+
+  private changeLevel(level: number, line: string): void {
+    const p = this.player;
+    p.stop();
+    p.level = level;
+    this.marker = null;
+    this.closeContainer();
+    this.cancelAction();
+    this.engaged = null;
+    this.hud.say(line, 900);
+  }
+
+  /** Nothing underfoot (out a first-floor window, over a railing): drop until something catches you. */
+  private checkFall(): void {
+    const p = this.player;
+    let drop = 0;
+    while (p.level > 0 && !this.world.floors[p.tileY * this.world.width + p.tileX]) {
+      p.level--;
+      drop++;
+    }
+    if (!drop) return;
+    p.stop();
+    this.marker = null;
+    this.closeContainer();
+    if (!this.world.isWalkable(p.tileX, p.tileY)) {
+      const t = nearestWalkable(this.world, p.tileX, p.tileY);
+      if (t) {
+        p.x = t.x + 0.5;
+        p.y = t.y + 0.5;
+      }
+    }
+    const hp = p.health;
+    hp.bruise(drop * (14 + Math.random() * 14) * (1.2 - p.survivor.skills.athletics * 0.05));
+    if (Math.random() < 0.3 * drop) hp.injure("laceration", 3, Math.random() < 0.5 ? "Left Leg" : "Right Leg");
+    this.hud.hurt();
+    this.hud.say(drop > 1 ? "AAAH-- ...everything hurts." : "Oof! Hit the ground hard.", 2400);
+    this.director.noise(p.x, p.y, 8);
+  }
+
+  /** How high the player stands above their storey's floor: partway up a flight of stairs. */
+  private stairLift(): number {
+    const p = this.player;
+    for (const f of this.flights()) {
+      if (p.level !== f.z) continue;
+      const dx = Math.sign(f.top.x - f.b0.x);
+      const dy = Math.sign(f.top.y - f.b0.y);
+      // -0.5 at the foot of the flight, 2.5 at the top edge
+      const u = (p.x - f.b0.x - 0.5) * dx + (p.y - f.b0.y - 0.5) * dy;
+      const across = (p.x - f.b0.x - 0.5) * dy + (p.y - f.b0.y - 0.5) * dx;
+      if (u < -0.5 || u > 2.5 || Math.abs(across) > 0.5) continue;
+      return ((u + 0.5) / 3) * WALL_H;
+    }
+    return 0;
+  }
+
+  /** Loose shards on the floor: careful feet usually get away with it, hands and knees don't. */
+  private stepOnGlass(): void {
+    const p = this.player;
+    const pile = this.world.objects.find((o) => o.comp.id === "item_pile" && o.x === p.tileX && o.y === p.tileY);
+    if (!pile?.inventory?.items.some((i) => i.def.id === "glass_shard")) return;
+    const crawl = p.stance === "crawl";
+    const chance = crawl ? 0.5 : p.sprinting ? 0.35 : p.stance === "crouch" ? 0.08 : 0.15;
+    if (Math.random() >= chance) return;
+    const deep = crawl || p.sprinting;
+    const part = crawl
+      ? (["Left Hand", "Right Hand", "Left Arm", "Right Arm"] as const)[Math.floor(Math.random() * 4)]
+      : Math.random() < 0.5 ? "Left Leg" : "Right Leg";
+    p.health.injure(deep ? "laceration" : "scratch", deep ? 3 : 1, part);
+    this.hud.hurt();
+    this.hud.say(crawl ? "Crawled right through the glass." : "Ow! Stepped on glass.", 1800);
   }
 
   private updateCombat(dt: number): void {
@@ -802,6 +1033,7 @@ export class Game {
     const sv = p.survivor;
     const lvl = sv.skills[w.skill];
     this.attackCd = w.cooldown * (1 - lvl * 0.04);
+    p.swing(Math.min(0.45, this.attackCd * 0.85));
     if (w.ranged && !this.takeRound(w)) {
       this.hud.say("I'm out of ammo.", 1600);
       this.engaged = null;
@@ -813,7 +1045,8 @@ export class Game {
     if (Math.random() < chance) {
       const str = w.ranged ? 1 : 0.7 + sv.attributes.strength * 0.06;
       const dmg = w.damage * str * (1 + lvl * 0.08) * (0.85 + Math.random() * 0.3);
-      if (this.director.damage(z, dmg, p.x, p.y)) this.kill(z);
+      // an empty-handed hit is a shove: little damage, but it sends them reeling
+      if (this.director.damage(z, dmg, p.x, p.y, w.item ? 0.3 : 0.65)) this.kill(z);
       this.train(w.skill, 5);
       // buckshot spreads into whoever's standing next to the target
       if (w.item?.def.id === "shotgun")
@@ -845,7 +1078,7 @@ export class Game {
     if (this.engaged === z) this.engaged = null;
     this.player.kills++;
     this.train(this.weapon().skill, 8);
-    const o = this.world.addObject({ type: "corpse", x: z.tileX, y: z.tileY, facing: "S", state: `${z.look}:${z.dir}` });
+    const o = this.ground.addObject({ type: "corpse", x: z.tileX, y: z.tileY, facing: "S", state: `${z.look}:${z.dir}` });
     // a turned survivor still has everything they were carrying, a dead driver has their keys
     if (z.items.length) {
       const inv = new Inventory(z.label !== "Zombie" ? `${z.label}'s body` : "Corpse", 40);
@@ -934,6 +1167,7 @@ export class Game {
     const s = p.satiety;
     if (s <= 50) out.push(["H", s > 30 ? "Peckish" : s > 12 ? "Hungry" : "Starving", s > 30 ? 1 : s > 12 ? 2 : 3]);
     if (h.bleeding) out.push(["B", "Bleeding", 2]);
+    if (p.winded) out.push(["~", "Out of breath", 2]);
     if (h.hp < 70) out.push(["+", h.hp < 30 ? "Critical" : h.hp < 50 ? "Badly hurt" : "Hurt", h.hp < 30 ? 3 : h.hp < 50 ? 2 : 1]);
     const sym = h.symptom;
     if (sym) out.push(["!", sym, sym === "Queasy" ? 1 : sym === "Nauseous" ? 2 : 3]);
@@ -947,7 +1181,7 @@ export class Game {
     const sv = p.survivor;
     if (this.driving) {
       const v = this.driving;
-      const spot = v.accessTiles(this.world)[0];
+      const spot = v.accessTiles(this.ground)[0];
       this.leaveCar(v);
       if (spot) {
         p.x = spot.x + 0.5;
@@ -999,6 +1233,147 @@ export class Game {
   }
 
   /** A new person, somewhere indoors and away from the dead. The world carries on as it was. */
+  // ------------------------------------------------------------ save & load
+
+  private saveTick = 15;
+
+  /** Write the whole game to localStorage. Skipped while dead, so the last save stands. */
+  save(): void {
+    const p = this.player;
+    if (p.dead) return;
+    const car = this.driving;
+    const sv = p.survivor;
+    const data: SaveData = {
+      v: 1,
+      time: this.time,
+      survivors: this.survivors,
+      levels: this.levels.map((w) => saveLevel(w, this.pumpFuel)),
+      player: {
+        // saved mid-drive, you come back standing next to the car
+        x: car ? car.x : p.x, y: car ? car.y : p.y, level: p.level, dir: p.dir, stance: p.stance,
+        satiety: p.satiety, stamina: p.stamina, alive: p.alive, kills: p.kills,
+        items: p.inventory.items.map(saveItem),
+        equipped: p.equipped ? p.inventory.items.indexOf(p.equipped) : -1,
+        hp: p.health.hp, wounds: p.health.wounds, infection: p.health.infection,
+        survivor: {
+          name: sv.name, occupation: sv.occupation, traits: sv.traits.map((t) => t.id), attributes: sv.attributes,
+          skills: sv.skills, xp: sv.xp, studied: [...sv.studied], look: sv.look, zombieLook: sv.zombieLook, infectionTime: sv.infectionTime,
+        },
+      },
+      // zombies queued to walk in come back as part of the off-map pool
+      pool: this.director.population - this.director.zombies.length,
+      zombies: this.director.zombies.map((z) => ({
+        x: z.x, y: z.y, look: z.look, hp: z.hp, dir: z.dir, label: z.label, rise: z.rise, items: z.items.map(saveItem),
+      })),
+      vehicles: this.vehicles.map((v) => ({
+        id: v.id, x: v.x, y: v.y, heading: v.heading, paint: v.paint, condition: v.condition, fuel: v.fuel,
+        wheels: v.wheels.map((w) => (w ? w.condition : -1)), hotwired: v.hotwired, trunk: v.trunk.items.map(saveItem),
+      })),
+    };
+    try {
+      localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+    } catch {
+      // storage full or blocked: nothing to do but keep playing
+    }
+  }
+
+  /** Pick up where the last session left off. False when there's no save to load. */
+  load(): boolean {
+    let data: SaveData;
+    try {
+      const raw = localStorage.getItem(SAVE_KEY);
+      if (!raw) return false;
+      data = JSON.parse(raw);
+    } catch {
+      return false;
+    }
+    if (data?.v !== 1) return false;
+    try {
+      this.applySave(data);
+    } catch (err) {
+      // a save this version can't read: start fresh rather than run on a half-loaded world
+      console.warn("Could not load the saved game, starting a new one.", err);
+      this.newGame();
+      return false;
+    }
+    return true;
+  }
+
+  private newGame(): void {
+    try {
+      localStorage.removeItem(SAVE_KEY);
+    } catch {
+      // nothing saved, or storage is blocked
+    }
+    // don't let the unload handler write the old game straight back
+    this.saveTick = Infinity;
+    this.save = () => {};
+    location.reload();
+  }
+
+  private applySave(d: SaveData): void {
+    this.time = d.time;
+    this.survivors = d.survivors;
+    d.levels.forEach((l, i) => this.levels[i] && loadLevel(this.levels[i], l, this.pumpFuel));
+
+    const s = d.player.survivor;
+    const sv = new Survivor(this.survivors);
+    Object.assign(sv, {
+      name: s.name, occupation: s.occupation, attributes: s.attributes, skills: s.skills, xp: s.xp,
+      look: s.look, zombieLook: s.zombieLook, infectionTime: s.infectionTime,
+      traits: s.traits.map((id) => TRAITS.find((t) => t.id === id)).filter((t) => !!t),
+    });
+    for (const id of s.studied) sv.studied.add(id);
+    const level = this.levels[d.player.level] ? d.player.level : 0;
+    const w = this.levels[level];
+    let { x, y } = d.player;
+    if (!w.isWalkable(Math.floor(x), Math.floor(y))) {
+      const t = nearestWalkable(w, Math.floor(x), Math.floor(y));
+      if (t) [x, y] = [t.x + 0.5, t.y + 0.5];
+    }
+    const p = new Player({ x: 0, y: 0 }, sv);
+    Object.assign(p, {
+      x, y, level, dir: d.player.dir, stance: d.player.stance, satiety: d.player.satiety, stamina: d.player.stamina,
+      alive: d.player.alive, kills: d.player.kills,
+    });
+    p.inventory.items = loadItems(d.player.items);
+    p.equipped = p.inventory.items[d.player.equipped] ?? null;
+    p.health.hp = d.player.hp;
+    p.health.wounds = d.player.wounds;
+    p.health.infection = d.player.infection;
+    // wound ids carry on from the highest one saved
+    (p.health as unknown as { nextId: number }).nextId = Math.max(0, ...d.player.wounds.map((w) => w.id)) + 1;
+    this.player = p;
+
+    const zs = this.director.zombies;
+    zs.length = 0;
+    for (const z of d.zombies) {
+      const n = new Zombie(z.x, z.y, z.look);
+      n.hp = z.hp;
+      n.dir = z.dir;
+      n.label = z.label;
+      n.rise = z.rise;
+      n.items = loadItems(z.items);
+      zs.push(n);
+    }
+    this.director.pool = d.pool;
+
+    for (const sv of d.vehicles) {
+      const v = this.vehicles.find((c) => c.id === sv.id);
+      if (!v) continue;
+      Object.assign(v, { x: sv.x, y: sv.y, heading: sv.heading, paint: sv.paint, condition: sv.condition, fuel: sv.fuel, hotwired: sv.hotwired });
+      v.wheels = sv.wheels.map((c) => (c < 0 ? null : { condition: c }));
+      v.trunk.items = loadItems(sv.trunk);
+      v.claim(this.ground);
+    }
+
+    const [cx, cy] = this.playerScreen();
+    this.camera.x = cx;
+    this.camera.y = cy;
+    this.refreshPanels();
+    this.hud.say(`${sv.name}, still alive. For now.`, 2600);
+  }
+
   private respawn(): void {
     this.survivors++;
     const tile = this.pickSpawn();
@@ -1013,7 +1388,7 @@ export class Game {
   }
 
   private pickSpawn(): { x: number; y: number } {
-    const { world } = this;
+    const world = this.ground;
     const zs = this.director.zombies;
     const scored: { t: { x: number; y: number }; d: number }[] = [];
     for (let y = 0; y < world.height; y++)
@@ -1034,7 +1409,7 @@ export class Game {
   // ------------------------------------------------------------ vehicles
 
   private spawnVehicles(): void {
-    const placements = this.world.data.vehicles ?? [];
+    const placements = this.ground.data.vehicles ?? [];
     placements.forEach((pl, i) => {
       const v = new Vehicle(i, pl.type, pl.x, pl.y, pl.heading);
       if (pl.paint) v.paint = pl.paint;
@@ -1042,7 +1417,7 @@ export class Game {
       v.fuel = v.type.tank * (pl.fuel ?? Math.random() * 0.4);
       if (pl.wheels) v.wheels = pl.wheels.map((c) => (c < 0 ? null : { condition: c }));
       v.trunk.items.push(...rollLoot("car", new Rng(i * 104729 + 17)));
-      v.claim(this.world);
+      v.claim(this.ground);
       this.vehicles.push(v);
       this.placeKey(v);
     });
@@ -1076,15 +1451,15 @@ export class Game {
     const out: { x: number; y: number }[] = [];
     for (let y = Math.floor(v.y - r); y <= v.y + r; y++)
       for (let x = Math.floor(v.x - r); x <= v.x + r; x++)
-        if (this.world.isWalkable(x, y) && Math.hypot(x + 0.5 - v.x, y + 0.5 - v.y) > 1.6) out.push({ x, y });
+        if (this.ground.isWalkable(x, y) && Math.hypot(x + 0.5 - v.x, y + 0.5 - v.y) > 1.6) out.push({ x, y });
     return out;
   }
 
   /** Put items on the ground at a tile, joining a pile that's already there. */
-  private dropItems(x: number, y: number, items: Item[]): void {
-    let pile = this.world.objects.find((o) => o.comp.id === "item_pile" && o.x === x && o.y === y);
+  private dropItems(x: number, y: number, items: Item[], world = this.world): void {
+    let pile = world.objects.find((o) => o.comp.id === "item_pile" && o.x === x && o.y === y);
     if (!pile) {
-      pile = this.world.addObject({ type: "item_pile", x, y });
+      pile = world.addObject({ type: "item_pile", x, y });
       pile.inventory = new Inventory("Ground", 50);
     }
     pile.inventory!.items.push(...items);
@@ -1109,14 +1484,51 @@ export class Game {
       then();
       return;
     }
-    const tiles = v.accessTiles(this.world);
-    const path = tiles.length ? findPath(this.world, { x: p.tileX, y: p.tileY }, tiles) : null;
+    const tiles = v.accessTiles(this.ground);
+    const path = tiles.length ? findPath(this.ground, { x: p.tileX, y: p.tileY }, tiles) : null;
     if (!path) {
       this.hud.say("I can't get to it.", 1500);
       return;
     }
     this.marker = null;
     p.walk(path, then);
+  }
+
+  /**
+   * Sit on a bench, chair or sofa, on the half nearest you, facing the way it faces. A picnic
+   * table has a bench on both long sides: take the one on your side, facing the table.
+   */
+  private sit(o: ObjectInstance): void {
+    const p = this.player;
+    const N: Record<Facing, [number, number]> = { S: [0, 1], E: [1, 0], N: [0, -1], W: [-1, 0] };
+    let [nx, ny] = N[o.facing];
+    const cx = o.x + o.wx / 2;
+    const cy = o.y + o.wy / 2;
+    let x = cx + nx * 0.06;
+    let y = cy + ny * 0.06;
+    if (o.comp.id === "picnic_table") {
+      // which side of the table you're on
+      const side = Math.sign((p.x - cx) * nx + (p.y - cy) * ny) || 1;
+      x = cx + nx * side * 0.38;
+      y = cy + ny * side * 0.38;
+      nx *= -side;
+      ny *= -side;
+    }
+    // along a two-seater, the end nearest you
+    const ax = Math.abs(ny);
+    const ay = Math.abs(nx);
+    const long = ax * (o.wx - 1) + ay * (o.wy - 1);
+    if (long > 0) {
+      const along = Math.sign((p.x - cx) * ax + (p.y - cy) * ay) || 1;
+      x += ax * along * 0.45;
+      y += ay * along * 0.45;
+    }
+    const front = nx + ny > 0;
+    const key = (o.x + o.wx - 1 + o.y + o.wy - 1) * 10 + (front ? 2.5 : 1.5);
+    p.stop();
+    p.stance = "stand";
+    p.seat = { x, y, dir: (Math.round(Math.atan2(ny, nx) / (Math.PI / 4)) + 8) % 8, key };
+    this.marker = null;
   }
 
   private vehicleOptions(v: Vehicle): MenuOption[] {
@@ -1180,7 +1592,7 @@ export class Game {
       return;
     }
     const [dx, dy] = v.wheelWorld(0);
-    const tiles = v.accessTiles(this.world).sort((a, b) => Math.hypot(a.x + 0.5 - dx, a.y + 0.5 - dy) - Math.hypot(b.x + 0.5 - dx, b.y + 0.5 - dy));
+    const tiles = v.accessTiles(this.ground).sort((a, b) => Math.hypot(a.x + 0.5 - dx, a.y + 0.5 - dy) - Math.hypot(b.x + 0.5 - dx, b.y + 0.5 - dy));
     if (!tiles.length) {
       this.hud.say("There's no room to open the door.", 1600);
       return;
@@ -1236,7 +1648,7 @@ export class Game {
     for (const v of this.vehicles) {
       const moving = Math.abs(v.vx) + Math.abs(v.vy) > 0.01;
       if (!moving && v !== this.driving) continue;
-      const { impact, hit, vx, vy } = v.update(dt, this.world);
+      const { impact, hit, vx, vy } = v.update(dt, this.ground);
       if (impact > 2) {
         const through = hit ? this.crashInto(v, hit, impact) : false;
         // plough on through what gave way, a lot slower
@@ -1285,9 +1697,9 @@ export class Game {
       const threshold = (c.category === "fence" ? (c.height < 40 ? 2.5 : 4.5) : c.door ? 6 : sturdy) + (e.barricade ?? 0);
       if (c.category === "window" && e.state === "default" && impact > 4) e.state = "broken";
       if (impact < threshold) return false;
-      this.world.removeEdge(e);
+      this.ground.removeEdge(e);
       if (c.category === "fence" || c.door || ["siding", "wallpaper", "kitchen", "bathroom"].includes(style))
-        this.dropItems(Math.floor(v.x), Math.floor(v.y), [createItem("plank")]);
+        this.dropItems(Math.floor(v.x), Math.floor(v.y), [createItem("plank")], this.ground);
       if (driver) this.hud.say(c.category === "wall" || c.category === "window" ? "Smashed right through the wall!" : `Smashed through the ${c.name.toLowerCase()}!`, 2000);
       return true;
     }
@@ -1295,9 +1707,9 @@ export class Game {
       const o = hit.o;
       if (o.comp.category === "nature" || o.comp.id === "gas_pump") return false;
       if (impact < 4 + o.comp.height / 30) return false;
-      this.world.removeObject(o);
+      this.ground.removeObject(o);
       const debris = [...(o.inventory?.items ?? []), createItem(/metal|fridge|stove|dumpster|toolbox|cooler|trash/.test(o.comp.id) ? "scrap_metal" : "plank")];
-      this.dropItems(o.x, o.y, debris);
+      this.dropItems(o.x, o.y, debris, this.ground);
       if (driver) this.hud.say(`Ploughed through the ${o.comp.name.toLowerCase()}.`, 1800);
       return true;
     }
@@ -1321,10 +1733,10 @@ export class Game {
       for (let d = L; d < L + 4; d += 0.4) {
         const tx = v.x + fx * d;
         const ty = v.y + fy * d;
-        if (!this.world.canSee(v.x + fx * L, v.y + fy * L, tx, ty)) break;
-        if (this.world.isWalkable(Math.floor(tx), Math.floor(ty))) land = { x: Math.floor(tx), y: Math.floor(ty) };
+        if (!this.ground.canSee(v.x + fx * L, v.y + fy * L, tx, ty)) break;
+        if (this.ground.isWalkable(Math.floor(tx), Math.floor(ty))) land = { x: Math.floor(tx), y: Math.floor(ty) };
       }
-      land ??= v.accessTiles(this.world)[0] ?? null;
+      land ??= v.accessTiles(this.ground)[0] ?? null;
       if (land) {
         this.leaveCar(v);
         p.x = land.x + 0.5;
@@ -1363,7 +1775,7 @@ export class Game {
         const push = W - Math.abs(lr) + 0.05;
         z.x += -fy * side * push;
         z.y += fx * side * push;
-        if (!this.world.isWalkable(z.tileX, z.tileY)) {
+        if (!this.ground.isWalkable(z.tileX, z.tileY)) {
           z.x -= -fy * side * push;
           z.y -= fx * side * push;
         }
@@ -1372,7 +1784,7 @@ export class Game {
   }
 
   private nearPump(v: Vehicle): ObjectInstance | undefined {
-    return this.world.objects.find((o) => o.comp.id === "gas_pump" && Math.hypot(o.x + 0.5 - v.x, o.y + 0.5 - v.y) < 3.2);
+    return this.ground.objects.find((o) => o.comp.id === "gas_pump" && Math.hypot(o.x + 0.5 - v.x, o.y + 0.5 - v.y) < 3.2);
   }
 
   private pumpLeft(o: ObjectInstance): number {
@@ -1623,42 +2035,98 @@ export class Game {
   }
 
   render(dpr: number): void {
-    const { renderer, atlas, world, camera } = this;
+    const { renderer, atlas, camera, player } = this;
     renderer.begin();
     const b = camera.bounds(40);
-    for (let ty = 0; ty < world.height; ty++)
-      for (let tx = 0; tx < world.width; tx++) {
-        const f = world.floors[ty * world.width + tx];
-        if (!f) continue;
-        const x = isoX(tx, ty);
-        const y = isoY(tx, ty);
-        if (x + 33 < b.x0 || x - 33 > b.x1 || y + 34 < b.y0 || y > b.y1) continue;
-        renderer.draw(atlas.get(floorKey(f.id, f.variant)), x, y);
-      }
-    if (this.marker) {
-      const m = atlas.get(MARKER_KEY);
-      const pulse = 0.65 + 0.35 * Math.sin(this.marker.t * 8);
-      renderer.draw(m, isoX(this.marker.x, this.marker.y), isoY(this.marker.x, this.marker.y), 1, 1, 1, pulse);
-    }
+    const [px, py] = this.playerScreen();
     const hov = this.hovered;
-    for (const d of this.drawables) {
-      const a = d.fader?.fade ?? 1;
-      const lit =
-        hov && d.target &&
-        ((hov.kind === "object" && d.target.kind === "object" && hov.obj === d.target.obj) ||
-          (hov.kind === "edge" && d.target.kind === "edge" && hov.edge === d.target.edge) ||
-          (hov.kind === "zombie" && d.target.kind === "zombie" && hov.z === d.target.z) ||
-          (hov.kind === "vehicle" && d.target.kind === "vehicle" && hov.v === d.target.v));
-      if (d.tint) renderer.draw(d.sprite, d.x, d.y, d.tint[0], d.tint[1], d.tint[2], a);
-      else if (lit && d.target?.kind === "zombie") renderer.draw(d.sprite, d.x, d.y, 1.4, 1.0, 1.0, a);
-      else {
-        const t = lit ? 1.3 : 1;
-        renderer.draw(d.sprite, d.x, d.y, t, t, t * 1.05, a);
+    for (const level of this.visibleLevels()) {
+      const world = this.levels[level];
+      const lift = level * WALL_H;
+      // storeys below you are in shadow; ones above fade where they'd hide you
+      const dim = level < player.level ? 0.6 : 1;
+      const above = level > player.level && !player.dead;
+      for (let ty = 0; ty < world.height; ty++)
+        for (let tx = 0; tx < world.width; tx++) {
+          const f = world.floors[ty * world.width + tx];
+          if (!f) continue;
+          const x = isoX(tx, ty);
+          const y = isoY(tx, ty, lift);
+          if (x + 33 < b.x0 || x - 33 > b.x1 || y + 34 < b.y0 || y > b.y1) continue;
+          const a = above && x - 32 < px + 12 && x + 32 > px - 12 && y < py && y + 32 > py - 62 ? 0.3 : 1;
+          renderer.draw(atlas.get(floorKey(f.id, f.variant)), x, y, dim, dim, dim, a);
+        }
+      if (this.marker && level === player.level) {
+        const m = atlas.get(MARKER_KEY);
+        const pulse = 0.65 + 0.35 * Math.sin(this.marker.t * 8);
+        renderer.draw(m, isoX(this.marker.x, this.marker.y), isoY(this.marker.x, this.marker.y, lift), 1, 1, 1, pulse);
+      }
+      for (const d of this.drawables) {
+        if (d.level !== level) continue;
+        const a = d.fader?.fade ?? 1;
+        const lit =
+          hov && d.target &&
+          ((hov.kind === "object" && d.target.kind === "object" && hov.obj === d.target.obj) ||
+            (hov.kind === "edge" && d.target.kind === "edge" && hov.edge === d.target.edge) ||
+            (hov.kind === "zombie" && d.target.kind === "zombie" && hov.z === d.target.z) ||
+            (hov.kind === "vehicle" && d.target.kind === "vehicle" && hov.v === d.target.v));
+        if (d.tint) renderer.draw(d.sprite, d.x, d.y, d.tint[0] * dim, d.tint[1] * dim, d.tint[2] * dim, a);
+        else if (lit && d.target?.kind === "zombie") renderer.draw(d.sprite, d.x, d.y, 1.4, 1.0, 1.0, a);
+        else {
+          const t = (lit ? 1.3 : 1) * dim;
+          renderer.draw(d.sprite, d.x, d.y, t, t, t * 1.05, a);
+        }
       }
     }
-    // snap to the world pixel grid so every texel lands on a whole block of screen pixels
-    const sx = Math.round(camera.x);
-    const sy = Math.round(camera.y);
-    renderer.end(sx, sy, camera.zoom * dpr, this.canvas.width, this.canvas.height, BG);
+    renderer.end(camera.x, camera.y, camera.zoom * dpr, this.canvas.width, this.canvas.height, BG);
   }
+}
+
+interface SaveData {
+  v: 1;
+  time: number;
+  survivors: number;
+  levels: SavedLevel[];
+  player: {
+    x: number;
+    y: number;
+    level: number;
+    dir: number;
+    stance: Stance;
+    satiety: number;
+    stamina: number;
+    alive: number;
+    kills: number;
+    items: SavedItem[];
+    equipped: number;
+    hp: number;
+    wounds: Wound[];
+    infection: number | null;
+    survivor: {
+      name: string;
+      occupation: string;
+      traits: string[];
+      attributes: Attributes;
+      skills: Record<SkillId, number>;
+      xp: Record<SkillId, number>;
+      studied: SkillId[];
+      look: string;
+      zombieLook: string;
+      infectionTime: number;
+    };
+  };
+  pool: number;
+  zombies: { x: number; y: number; look: string; hp: number; dir: number; label: string; rise: number; items: SavedItem[] }[];
+  vehicles: {
+    id: number;
+    x: number;
+    y: number;
+    heading: number;
+    paint: string;
+    condition: number;
+    fuel: number;
+    wheels: number[];
+    hotwired: boolean;
+    trunk: SavedItem[];
+  }[];
 }

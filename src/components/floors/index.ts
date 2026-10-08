@@ -10,4 +10,6 @@ import { roadLine } from "./road-line";
 import { sidewalk } from "./sidewalk";
 import { woodFloor } from "./wood-floor";
 
-export const floors = [grass, dirt, asphalt, roadLine, sidewalk, concrete, woodFloor, kitchenTile, bathroomTile, carpet, linoleum];
+import { stairGap } from "../structure/stairs";
+
+export const floors = [grass, dirt, asphalt, roadLine, sidewalk, concrete, woodFloor, kitchenTile, bathroomTile, carpet, linoleum, stairGap];

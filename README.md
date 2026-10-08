@@ -7,7 +7,7 @@
 ## Features
 
 - Isometric town with houses, a corner store, a gas station, an auto repair shop, yards and streets
-- Pixel-art sprites, all drawn in code and snapped to a 32-colour palette (no image files)
+- Project Zomboid style art: painterly, muted isometric sprites with soft shadows, all drawn in code (no image files). Characters are posed as a small 3D rig, so all 8 directions are real views
 - Containers you can search (fridges, shelves, wardrobes, crates and more), each with its own loot table
 - Inventory with weight and capacity, plus an equipped-item slot
 - Food, weapons and supplies, each with its own condition and stats
@@ -32,14 +32,15 @@
 
 | Input | Action |
 | --- | --- |
+| `W` `A` `S` `D` / arrows | Walk |
 | Right-click | Walk (hold to steer); on a thing, show everything you can do with it |
 | Left-click | The obvious action (attack, open, use a door), or the action menu |
 | `Space` | Attack the nearest zombie |
 | `I` / `Tab` | Inventory |
 | `H` | Health |
-| `S` | Skills |
+| `K` | Skills |
 | `E` | Get in / out of a car |
-| `W` `A` `S` `D` / arrows | Drive |
+| `W` `A` `S` `D` / arrows (in a car) | Drive |
 | `Space` (in a car) | Handbrake |
 | Mouse wheel | Zoom |
 | `Esc` | Close |
@@ -66,7 +67,7 @@ Other scripts:
 ```
 src/
   engine/      WebGPU renderer, sprite atlas, camera, input
-  art/         Drawing helpers, palette and pixelisation
+  art/         Drawing helpers, colours, characters and vehicles
   components/  Floors, furniture, structures, nature, vehicles
   items/       Item definitions, icons, loot tables
   world/       Map data, inventory, pathfinding

@@ -1,9 +1,8 @@
 import { HALF_H, HALF_W } from "../core/iso";
 import { LIGHT, shade } from "./color";
-import { INK } from "./pixel";
 
-/** Sprites are rasterised at this multiple of world pixels. 1 keeps the chunky 8-bit pixel grid. */
-export const SS = 1;
+/** Sprites are rasterised at this multiple of world pixels, so they stay sharp when zoomed in. */
+export const SS = 2;
 
 export type V3 = [number, number, number];
 
@@ -41,7 +40,7 @@ export class Painter {
     return isoVec(p[0], p[1], p[2]);
   }
 
-  poly(pts: V3[], fill?: string, stroke?: string, lw = 0.75): void {
+  poly(pts: V3[], fill?: string, stroke?: string, lw = 0.6): void {
     const ctx = this.ctx;
     ctx.beginPath();
     pts.forEach((p, i) => {
@@ -64,7 +63,7 @@ export class Painter {
 
   /** Axis-aligned world box. Only camera-facing faces (+x, +y, top) are drawn. */
   box(x0: number, y0: number, z0: number, x1: number, y1: number, z1: number, color: string, style: BoxStyle = {}): void {
-    const edge = style.edge === undefined ? shade(color, 0.45) : style.edge || undefined;
+    const edge = style.edge === undefined ? shade(color, 0.6) : style.edge || undefined;
     const right = style.right ?? shade(color, LIGHT.right);
     const left = style.left ?? shade(color, LIGHT.left);
     const top = style.top ?? shade(color, LIGHT.top);
@@ -88,26 +87,31 @@ export class Painter {
     ctx.restore();
   }
 
-  /** Dithered contact shadow under a footprint: a checkerboard of dark pixels, 8-bit style. */
+  /** Soft contact shadow under a footprint: a blurred dark ellipse on the ground. */
   groundShade(cx: number, cy: number, rx: number, ry: number, alpha = 0.22): void {
     const [x, y] = this.pt([cx, cy, 0]);
-    const ctx = this.ctx;
-    // shrink with alpha so faint shadows stay small
-    const k = Math.min(1, 0.55 + alpha);
-    const ex = rx * k;
-    const ey = ry * k;
-    ctx.save();
-    ctx.fillStyle = INK;
-    for (let j = Math.floor(-ey); j <= ey; j++)
-      for (let i = Math.floor(-ex); i <= ex; i++) {
-        if ((i + j) & 1 || (i * i) / (ex * ex) + (j * j) / (ey * ey) > 1) continue;
-        ctx.fillRect(Math.round(x) + i, Math.round(y) + j, 1, 1);
-      }
-    ctx.restore();
+    softShadow(this.ctx, x, y, rx, ry, alpha);
   }
 }
 
-/** Sparse whole-pixel speckle inside the current clip/path area. Kept light for the simple 8-bit look. */
+/** Dark ellipse fading out toward its rim, centred on (x, y) in the current transform. */
+export function softShadow(ctx: CanvasRenderingContext2D, x: number, y: number, rx: number, ry: number, alpha = 0.22): void {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(1, ry / rx);
+  const g = ctx.createRadialGradient(0, 0, 0, 0, 0, rx);
+  const a = Math.min(0.75, alpha * 2.2);
+  g.addColorStop(0, `rgba(8,10,8,${a})`);
+  g.addColorStop(0.55, `rgba(8,10,8,${a * 0.75})`);
+  g.addColorStop(1, "rgba(8,10,8,0)");
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(0, 0, rx, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+/** Painterly speckle: small soft dabs of colour scattered over a w x h area. */
 export function speckle(
   ctx: CanvasRenderingContext2D,
   w: number,
@@ -117,10 +121,9 @@ export function speckle(
   rnd: () => number,
   size = 1,
 ): void {
-  const n = Math.round(count * 0.25);
-  for (let i = 0; i < n; i++) {
+  for (let i = 0; i < count; i++) {
     ctx.fillStyle = colors[Math.floor(rnd() * colors.length)];
-    const s = Math.max(1, Math.round(size));
-    ctx.fillRect(Math.floor(rnd() * w), Math.floor(rnd() * h), s, s);
+    const s = size * (0.6 + rnd() * 0.8);
+    ctx.fillRect(rnd() * w, rnd() * h, s, s);
   }
 }

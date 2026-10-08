@@ -2,7 +2,7 @@ import { itemIcon } from "../items/registry";
 import type { Item } from "../items/types";
 import { el } from "./dom";
 
-/** Equipped slot, inventory button, hunger moodle, help, hover label and halo text. */
+/** Equipped slot, panel buttons, hunger moodle, hover label and halo text. */
 export class Hud {
   private slot: HTMLDivElement;
   private slotImg: HTMLImageElement;
@@ -12,6 +12,7 @@ export class Hud {
   private halo: HTMLDivElement;
   private haloUntil = 0;
   private hpBar: HTMLDivElement;
+  private staminaBar: HTMLDivElement;
   private who: HTMLDivElement;
   private hurtFx: HTMLDivElement;
   private death: HTMLDivElement;
@@ -30,16 +31,10 @@ export class Hud {
     onUnequip: () => void,
     onHealth: () => void,
     onSkills: () => void,
+    onSettings: () => void,
     onRespawn: () => void,
     drive: { engine: () => void; hotwire: () => void; exit: () => void },
   ) {
-    const help = el("div", "help", root);
-    help.innerHTML =
-      "<b>Right-click</b> walk (hold to steer), or a thing for all actions &nbsp;·&nbsp; <b>Left-click</b> open / use<br>" +
-      "<b>Left-click</b> a zombie to attack &nbsp;·&nbsp; <b>Space</b> attack nearest<br>" +
-      "<b>E</b> get in / out of a car &nbsp;·&nbsp; <b>WASD</b> / <b>arrows</b> drive &nbsp;·&nbsp; <b>Space</b> handbrake<br>" +
-      "<b>I</b> inventory &nbsp;·&nbsp; <b>H</b> health &nbsp;·&nbsp; <b>S</b> skills &nbsp;·&nbsp; <b>Wheel</b> zoom &nbsp;·&nbsp; <b>Esc</b> close";
-
     const hud = el("div", "hud", root);
     this.slot = el("div", "slot", hud);
     this.slotImg = el("img", undefined, this.slot);
@@ -58,10 +53,15 @@ export class Hud {
     el("span", undefined, row, "HP");
     const bar = el("div", "bar", row);
     this.hpBar = el("div", undefined, bar);
+    const srow = el("div", "row", vitals);
+    el("span", undefined, srow, "ST");
+    this.staminaBar = el("div", undefined, el("div", "bar", srow));
+    this.staminaBar.style.background = "#6fb6c4";
     const btn = el("button", "hud-btn", hud, "Inventory [I]");
     btn.addEventListener("click", onInventory);
     el("button", "hud-btn", hud, "Health [H]").addEventListener("click", onHealth);
-    el("button", "hud-btn", hud, "Skills [S]").addEventListener("click", onSkills);
+    el("button", "hud-btn", hud, "Skills [K]").addEventListener("click", onSkills);
+    el("button", "hud-btn", hud, "Settings [Esc]").addEventListener("click", onSettings);
 
     this.progress = el("div", "progress", root);
     this.progressLabel = el("span", undefined, this.progress);
@@ -99,14 +99,15 @@ export class Hud {
     this.slotCond.parentElement!.hidden = item?.condition === undefined;
     if (item?.condition !== undefined) {
       this.slotCond.style.width = `${item.condition * 100}%`;
-      this.slotCond.style.background = item.condition > 0.5 ? "#63c74d" : item.condition > 0.25 ? "#feae34" : "#e43b44";
+      this.slotCond.style.background = item.condition > 0.5 ? "#5c9e4e" : item.condition > 0.25 ? "#d8b25a" : "#c8443a";
     }
   }
 
-  setVitals(name: string, hp: number): void {
+  setVitals(name: string, hp: number, stamina: number): void {
+    this.staminaBar.style.width = `${Math.max(0, stamina)}%`;
     this.who.textContent = name;
     this.hpBar.style.width = `${Math.max(0, hp)}%`;
-    this.hpBar.style.background = hp > 60 ? "#63c74d" : hp > 30 ? "#feae34" : "#e43b44";
+    this.hpBar.style.background = hp > 60 ? "#5c9e4e" : hp > 30 ? "#d8b25a" : "#c8443a";
   }
 
   /** Status icons on the right: [letter, label, severity 1..3]. */
@@ -115,7 +116,7 @@ export class Hud {
     if (this.moodles.dataset.key === key) return;
     this.moodles.dataset.key = key;
     this.moodles.innerHTML = "";
-    const colors = ["", "#fee761", "#f77622", "#e43b44"];
+    const colors = ["", "#d8c46a", "#c87a3a", "#c8443a"];
     for (const [letter, label, sev] of list) {
       const m = el("div", "moodle", this.moodles);
       const i = el("i", undefined, m, letter);

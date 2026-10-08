@@ -16,7 +16,29 @@ export interface MapData {
   edges: EdgePlacement[];
   objects: ObjectPlacement[];
   vehicles?: VehiclePlacement[];
+  /** Upper storeys, first floor up first. Same size as the ground; tiles of -1 are open air. */
+  levels?: LevelData[];
+  /** Staircases between storeys. */
+  stairs?: StairPlacement[];
   spawn: { x: number; y: number };
+}
+
+export interface LevelData {
+  floorPalette: string[];
+  tiles: number[];
+  edges: EdgePlacement[];
+  objects: ObjectPlacement[];
+}
+
+/**
+ * A straight 3-tile staircase on storey z leading up to z + 1. (x, y) is the bottom step;
+ * it climbs toward `dir`, so the top step is two tiles further along.
+ */
+export interface StairPlacement {
+  x: number;
+  y: number;
+  dir: Facing;
+  z: number;
 }
 
 export interface VehiclePlacement {

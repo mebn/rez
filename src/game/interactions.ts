@@ -40,7 +40,11 @@ export interface Host {
   dropItems(x: number, y: number, items: Item[]): void;
   open(o: ObjectInstance): void;
   toggleDoor(e: EdgeInstance): void;
+  sit(o: ObjectInstance): void;
 }
+
+/** Things you can sit on. */
+export const SEATS = new Set(["bench", "chair", "sofa", "armchair", "picnic_table"]);
 
 const NAMES: Record<string, string> = {
   hammer: "hammer", plank: "plank", nails: "nails", crowbar: "crowbar", sledgehammer: "sledgehammer",
@@ -123,13 +127,24 @@ function edgeActions(h: Host, e: EdgeInstance): Interaction[] {
   if (door && !barr && !e.broken)
     out.push({ id: "toggle", label: e.state === "open" ? "Close" : "Open", needs: [], chance: null, time: 0, run: () => h.toggleDoor(e) });
 
+  if (win && (e.state === "default" || e.state === "raised") && !barr)
+    out.push({
+      id: "window", label: e.state === "raised" ? "Close window" : "Open window", needs: [], chance: null, time: 0.6, noise: 2,
+      run: () => {
+        e.state = e.state === "raised" ? "default" : "raised";
+      },
+    });
+
   if (win && e.state === "default" && !barr)
     out.push({
       id: "smash", label: equipped ? `Smash window (${equipped.def.name.toLowerCase()})` : "Smash window (bare hands)",
       needs: [], chance: null, time: 1, noise: 12,
       run: () => {
         e.state = "broken";
-        h.dropItems(h.player.tileX, h.player.tileY, items("glass_shard", randInt(1, 3)));
+        // glass falls both ways: some at your feet, some on the far side
+        h.dropItems(h.player.tileX, h.player.tileY, items("glass_shard", randInt(1, 2)));
+        const far = acrossEdge(h, e);
+        if (h.world.isWalkable(far.x, far.y)) h.dropItems(far.x, far.y, items("glass_shard", randInt(1, 2)));
         if (!h.player.equipped && Math.random() < 0.5) {
           h.player.health.injure("laceration", 4, Math.random() < 0.5 ? "Left Hand" : "Right Hand");
           h.hurt();
@@ -269,9 +284,10 @@ function objectActions(h: Host, o: ObjectInstance): Interaction[] {
   const c = o.comp;
   const nature = c.category === "nature";
   const tree = c.id.startsWith("tree_");
-  const special = c.id === "item_pile" || c.id === "gas_pump";
+  const special = c.id === "item_pile" || c.id === "gas_pump" || c.id === "stairs_wood";
 
   if (c.container) out.push({ id: "open", label: c.id === "corpse" ? "Search" : "Open", needs: [], chance: null, time: 0, run: () => h.open(o) });
+  if (SEATS.has(c.id)) out.push({ id: "sit", label: "Sit down", needs: [], chance: null, time: 0, run: () => h.sit(o) });
 
   // push or drag things around: block doors, clear a path
   if (!nature && !special && o.wx * o.wy <= 2) {

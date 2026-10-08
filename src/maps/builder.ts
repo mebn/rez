@@ -1,5 +1,8 @@
 import type { Facing, Side } from "../core/types";
-import type { EdgePlacement, MapData, ObjectPlacement, VehiclePlacement } from "../world/map-data";
+import type { EdgePlacement, LevelData, MapData, ObjectPlacement, StairPlacement, VehiclePlacement } from "../world/map-data";
+
+const DIR: Record<Facing, [number, number]> = { N: [0, -1], S: [0, 1], E: [1, 0], W: [-1, 0] };
+const OPPOSITE: Record<Facing, Facing> = { N: "S", S: "N", E: "W", W: "E" };
 
 type EdgeDraft =
   | { kind: "wall" | "window"; x: number; y: number; side: Side; exterior: string }
@@ -25,6 +28,8 @@ export class MapBuilder {
   private edges = new Map<string, EdgeDraft>();
   private objects: ObjectPlacement[] = [];
   private vehicles: VehiclePlacement[] = [];
+  private storeys: MapBuilder[] = [];
+  private flights: StairPlacement[] = [];
 
   constructor(
     private name: string,
@@ -127,12 +132,85 @@ export class MapBuilder {
     return this;
   }
 
+  /**
+   * The builder for storey z (1 = first floor up). Upper storeys start as open air; lay rooms
+   * on them like on the ground. Only call this on the ground builder.
+   */
+  storey(z: number): MapBuilder {
+    while (this.storeys.length < z) {
+      const s = new MapBuilder(this.name, this.width, this.height, this.seed);
+      this.storeys.push(s);
+    }
+    return this.storeys[z - 1];
+  }
+
+  /**
+   * A staircase on storey z, bottom step at (x, y), climbing toward dir for three tiles to
+   * storey z + 1. The storey above gets a railed opening over the lower two steps; the top
+   * step's tile up there is the landing and keeps its floor.
+   */
+  stairs(x: number, y: number, dir: Facing, z = 0): this {
+    const [dx, dy] = DIR[dir];
+    const tx = x + dx * 2;
+    const ty = y + dy * 2;
+    const at = z === 0 ? this : this.storey(z);
+    at.objects.push({ type: "stairs_wood", x: Math.min(x, tx), y: Math.min(y, ty), facing: OPPOSITE[dir] });
+    this.flights.push({ x, y, dir, z });
+    return this;
+  }
+
+  private layer(): LevelData {
+    return { floorPalette: this.palette, tiles: this.tiles, edges: this.edgeList(), objects: this.objects };
+  }
+
+  /** Cut the stairwell into the storey above each flight and rail it off. */
+  private cutStairwells(): void {
+    for (const s of this.flights) {
+      const up = this.storey(s.z + 1);
+      const [dx, dy] = DIR[s.dir];
+      const b0 = { x: s.x, y: s.y };
+      const b1 = { x: s.x + dx, y: s.y + dy };
+      // the lower step is open air, the next one is where you step down onto the flight
+      up.tiles[b0.y * up.width + b0.x] = -1;
+      up.setFloor(b1.x, b1.y, "stair_gap");
+      const [px, py] = [-dy, dx];
+      for (const t of [b0, b1])
+        for (const sgn of [1, -1]) up.rail(t.x, t.y, px * sgn, py * sgn);
+      up.rail(b0.x, b0.y, -dx, -dy);
+    }
+  }
+
+  /** Railing on the border of (x, y) toward (dx, dy). */
+  private rail(x: number, y: number, dx: number, dy: number): void {
+    const [ex, ey, side]: [number, number, Side] =
+      dx === 1 ? [x + 1, y, "W"] : dx === -1 ? [x, y, "W"] : dy === 1 ? [x, y + 1, "N"] : [x, y, "N"];
+    if (!this.edges.has(this.key(ex, ey, side))) this.edge(ex, ey, side, "railing_wood");
+  }
+
   vehicle(v: VehiclePlacement): this {
     this.vehicles.push(v);
     return this;
   }
 
   build(spawn: { x: number; y: number }): MapData {
+    this.cutStairwells();
+    return {
+      version: 1,
+      name: this.name,
+      width: this.width,
+      height: this.height,
+      seed: this.seed,
+      floorPalette: this.palette,
+      tiles: this.tiles,
+      edges: this.edgeList(),
+      objects: this.objects,
+      vehicles: this.vehicles,
+      ...(this.storeys.length ? { levels: this.storeys.map((s) => s.layer()), stairs: this.flights } : {}),
+      spawn,
+    };
+  }
+
+  private edgeList(): EdgePlacement[] {
     const edges: EdgePlacement[] = [];
     for (const e of this.edges.values()) {
       if (e.kind === "fixed") {
@@ -144,18 +222,6 @@ export class MapBuilder {
       const style = inside ?? e.exterior;
       edges.push({ type: `${e.kind}_${style}`, x: e.x, y: e.y, side: e.side });
     }
-    return {
-      version: 1,
-      name: this.name,
-      width: this.width,
-      height: this.height,
-      seed: this.seed,
-      floorPalette: this.palette,
-      tiles: this.tiles,
-      edges,
-      objects: this.objects,
-      vehicles: this.vehicles,
-      spawn,
-    };
+    return edges;
   }
 }

@@ -55,8 +55,9 @@ export function makeWindow(style: WallStyle): EdgeComponent {
     name: `${style.name} Window`,
     category: "window",
     height: WALL_H,
-    // default = intact glass, broken = jagged shards left in the frame, open = frame cleared
-    states: ["default", "broken", "open"],
+    // default = shut, raised = sash pushed up (open, glass intact), broken = jagged shards left
+    // in the frame, open = frame cleared
+    states: ["default", "raised", "broken", "open"],
     blocksMovement: () => true,
     draw(f, state) {
       const [lo, hi] = [32, 72];
@@ -76,7 +77,21 @@ export function makeWindow(style: WallStyle): EdgeComponent {
             ctx.fill();
           }
         });
-      else if (state !== "open") f.face("front", 5, -0.5, lo, 27, 0.5, hi, (ctx, w, h) => {
+      else if (state === "raised") {
+        // the lower sash slid up behind the upper one: glass doubled at the top, a gap below
+        const mid = (lo + hi) / 2 + 2;
+        f.face("front", 5, -0.5, mid, 27, 0.5, hi, (ctx, w, h) => {
+          ctx.fillStyle = "rgba(120,150,165,0.6)";
+          ctx.fillRect(0, 0, w, h);
+          ctx.strokeStyle = "rgba(255,255,255,0.4)";
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(w * 0.25, h * 0.85);
+          ctx.lineTo(w * 0.5, h * 0.15);
+          ctx.stroke();
+        });
+        f.box(5, -1.2, mid - 2.5, 27, 1.2, mid, frame);
+      } else if (state !== "open") f.face("front", 5, -0.5, lo, 27, 0.5, hi, (ctx, w, h) => {
         const g = ctx.createLinearGradient(0, 0, w, h);
         g.addColorStop(0, "rgba(170,200,210,0.55)");
         g.addColorStop(0.5, "rgba(120,150,165,0.45)");
@@ -92,7 +107,7 @@ export function makeWindow(style: WallStyle): EdgeComponent {
       });
       // sill and frame
       f.box(4, -WALL_T - 1, lo - 2, 28, WALL_T + 2.5, lo, frame);
-      f.box(15, -0.6, lo, 17, 0.6, hi, frame);
+      f.box(15, -0.6, state === "raised" ? (lo + hi) / 2 : lo, 17, 0.6, hi, frame);
       wallSlab(f, style, 27, 32 + WALL_T, 0, WALL_H);
       f.face("front", 5, -WALL_T, lo, 27, WALL_T, hi, (ctx, w, h) => {
         ctx.strokeStyle = shade(frame, 0.8);

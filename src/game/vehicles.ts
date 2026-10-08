@@ -38,39 +38,39 @@ export const VEHICLE_TYPES: Record<string, VehicleType> = {
   compact: {
     id: "compact", name: "Hatchback",
     shape: { length: 1.9, width: 0.95, bodyH: 22, cabinH: 40, cabin: [0.18, 0.72] },
-    paints: ["#3e8948", "#feae34", "#c0cbdc", "#0099db"],
+    paints: ["#4d6b48", "#c9a24a", "#a9adb0", "#3f6488"],
     maxSpeed: 8, accel: 4.5, brake: 10, turn: 2.8, understeer: 0.06, grip: 8, tank: 35, burn: 0.035, toughness: 0.8, trunk: 25,
   },
   sedan: {
     id: "sedan", name: "Sedan",
     shape: { length: 2.3, width: 1.0, bodyH: 24, cabinH: 42, cabin: [0.25, 0.7] },
-    paints: ["#5a6988", "#a22633", "#ead4aa", "#262b44"],
+    paints: ["#6b6f73", "#7d2a26", "#c8b994", "#2a3142"],
     maxSpeed: 9.5, accel: 4.5, brake: 9, turn: 2.3, understeer: 0.08, grip: 7, tank: 50, burn: 0.05, toughness: 1, trunk: 40,
   },
   pickup: {
     id: "pickup", name: "Pickup Truck",
     shape: { length: 2.6, width: 1.05, bodyH: 28, cabinH: 50, cabin: [0.45, 0.76], bed: true },
-    paints: ["#733e39", "#124e89", "#c0cbdc", "#be4a2f"],
+    paints: ["#6a4a36", "#2e4a6e", "#a9adb0", "#a4562f"],
     maxSpeed: 9, accel: 4, brake: 8, turn: 1.9, understeer: 0.12, grip: 5, tank: 70, burn: 0.08, toughness: 1.6, trunk: 60,
   },
   sports: {
     id: "sports", name: "Sports Car",
     shape: { length: 2.2, width: 1.0, bodyH: 18, cabinH: 32, cabin: [0.3, 0.64] },
-    paints: ["#e43b44", "#feae34", "#181425", "#ffffff"],
+    paints: ["#9e2d27", "#c9a24a", "#1e1f21", "#d9d8d2"],
     maxSpeed: 13, accel: 7.5, brake: 11, turn: 2.6, understeer: 0.05, grip: 4.5, tank: 45, burn: 0.09, toughness: 0.7, trunk: 15,
   },
   van: {
     id: "van", name: "Van",
     shape: { length: 2.6, width: 1.1, bodyH: 26, cabinH: 58, cabin: [0.04, 0.88], van: true },
-    paints: ["#ffffff", "#8b9bb4", "#265c42", "#68386c"],
+    paints: ["#d9d8d2", "#7f868c", "#34503c", "#55405e"],
     maxSpeed: 7.5, accel: 3, brake: 7, turn: 1.7, understeer: 0.14, grip: 4, tank: 70, burn: 0.085, toughness: 1.3, trunk: 80,
   },
 };
 
 const COLOR_NAMES: Record<string, string> = {
-  "#3e8948": "Green", "#feae34": "Yellow", "#c0cbdc": "Silver", "#0099db": "Blue", "#5a6988": "Grey", "#a22633": "Red",
-  "#ead4aa": "Beige", "#262b44": "Navy", "#733e39": "Brown", "#124e89": "Blue", "#be4a2f": "Orange", "#e43b44": "Red",
-  "#181425": "Black", "#ffffff": "White", "#8b9bb4": "Grey", "#265c42": "Dark Green", "#68386c": "Purple",
+  "#4d6b48": "Green", "#c9a24a": "Yellow", "#a9adb0": "Silver", "#3f6488": "Blue", "#6b6f73": "Grey", "#7d2a26": "Red",
+  "#c8b994": "Beige", "#2a3142": "Navy", "#6a4a36": "Brown", "#2e4a6e": "Blue", "#a4562f": "Orange", "#9e2d27": "Red",
+  "#1e1f21": "Black", "#d9d8d2": "White", "#7f868c": "Grey", "#34503c": "Dark Green", "#55405e": "Purple",
 };
 
 /** Wheel slots: front-left, front-right, rear-left, rear-right. */

@@ -40,6 +40,7 @@ import { gasPump } from "./auto/gas-pump";
 import { tireRack } from "./auto/tire-rack";
 import { partsShelf } from "./auto/parts-shelf";
 import { itemPile } from "./auto/item-pile";
+import { stairsWood } from "./structure/stairs";
 
 export function registerAllComponents(): void {
   registry.register(
@@ -56,5 +57,6 @@ export function registerAllComponents(): void {
     car, carRed,
     corpse,
     gasPump, tireRack, partsShelf, itemPile,
+    stairsWood,
   );
 }

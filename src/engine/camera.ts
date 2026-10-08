@@ -1,11 +1,9 @@
 export class Camera {
   x = 0;
   y = 0;
-  /** Whole-number zoom keeps pixel art crisp: every world pixel is an exact square on screen. */
   zoom = 2;
   readonly minZoom = 1;
   readonly maxZoom = 4;
-  private wheelAcc = 0;
 
   /** Viewport size in CSS px. */
   viewW = 1;
@@ -17,13 +15,10 @@ export class Camera {
     this.y += (ty - this.y) * k;
   }
 
-  /** Step zoom by whole levels. Wheel deltas are accumulated so trackpads don't skip levels. */
+  /** Smooth, multiplicative zoom so a wheel notch feels the same at every level. */
   wheel(delta: number): void {
-    this.wheelAcc += delta;
-    if (Math.abs(this.wheelAcc) < 100) return;
-    const step = this.wheelAcc > 0 ? -1 : 1;
-    this.wheelAcc = 0;
-    this.zoom = Math.min(this.maxZoom, Math.max(this.minZoom, this.zoom + step));
+    const z = this.zoom * Math.exp(-Math.max(-200, Math.min(200, delta)) * 0.0015);
+    this.zoom = Math.min(this.maxZoom, Math.max(this.minZoom, z));
   }
 
   /** CSS px on screen -> world px. */
